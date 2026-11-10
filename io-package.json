@@ -1,0 +1,138 @@
+{
+    "common": {
+        "name": "google-calendar",
+        "version": "0.0.1",
+        "news": {
+            "0.0.1": {
+                "en": "initial release",
+                "de": "Erstveröffentlichung",
+                "ru": "Начальная версия",
+                "pt": "lançamento inicial",
+                "nl": "Eerste uitgave",
+                "fr": "Première version",
+                "it": "Versione iniziale",
+                "es": "Versión inicial",
+                "pl": "Pierwsze wydanie",
+                "uk": "Початкова версія",
+                "zh-cn": "首次出版"
+            }
+        },
+        "titleLang": {
+            "en": "Google Calendar",
+            "de": "Google Kalender",
+            "ru": "Google Календарь",
+            "pt": "Google Agenda",
+            "nl": "Google Agenda",
+            "fr": "Google Agenda",
+            "it": "Calendario di Google",
+            "es": "Calendario de Google",
+            "pl": "Kalendarz Google",
+            "uk": "Календар Google",
+            "zh-cn": "谷歌日历"
+        },
+        "desc": {
+            "en": "Reads Google Calendar events with a service account and provides them for visualisations",
+            "de": "Liest Google Kalender-Termine mit einem Dienstkonto und stellt sie für Visualisierungen bereit",
+            "ru": "Считывает события Календаря Google с помощью сервисной учетной записи и предоставляет их для визуализации.",
+            "pt": "Lê eventos do Google Agenda com uma conta de serviço e os fornece para visualização",
+            "nl": "Leest Google Agenda-afspraken met een serviceaccount en stelt deze beschikbaar voor visualisaties",
+            "fr": "Lit les événements Google Agenda avec un compte de service et les fournit pour des visualisations",
+            "it": "Legge gli eventi di Google Calendar con un account di servizio e li fornisce per la visualizzazione",
+            "es": "Lee eventos de Google Calendar con una cuenta de servicio y los proporciona para visualizaciones",
+            "pl": "Odczytuje wydarzenia z Kalendarza Google za pomocą konta usługi i udostępnia je do wizualizacji",
+            "uk": "Читає події Календаря Google за допомогою облікового запису служби та надає їх для візуалізації",
+            "zh-cn": "使用服务帐户读取 Google 日历事件并提供它们以进行可视化"
+        },
+        "authors": ["typhosj <typhosj@gmx.de>"],
+        "keywords": ["calendar", "google", "appointments", "birthdays", "reminders"],
+        "licenseInformation": {
+            "type": "free",
+            "license": "MIT"
+        },
+        "platform": "Javascript/Node.js",
+        "icon": "google-calendar.png",
+        "enabled": true,
+        "extIcon": "https://raw.githubusercontent.com/typhosj/ioBroker.google-calendar/main/admin/google-calendar.png",
+        "readme": "https://github.com/typhosj/ioBroker.google-calendar/blob/main/README.md",
+        "loglevel": "info",
+        "tier": 3,
+        "mode": "daemon",
+        "type": "date-and-time",
+        "compact": true,
+        "connectionType": "cloud",
+        "dataSource": "poll",
+        "adminUI": {
+            "config": "json"
+        },
+        "dependencies": [
+            {
+                "js-controller": ">=6.0.11"
+            }
+        ],
+        "globalDependencies": [
+            {
+                "admin": ">=7.6.20"
+            }
+        ],
+        "nogit": true
+    },
+    "native": {
+        "serviceAccountKey": "",
+        "calendars": [],
+        "pollMinutes": 5,
+        "daysPast": 30,
+        "daysPreview": 150
+    },
+    "protectedNative": ["serviceAccountKey"],
+    "encryptedNative": ["serviceAccountKey"],
+    "objects": [],
+    "instanceObjects": [
+        {
+            "_id": "info",
+            "type": "channel",
+            "common": {
+                "name": "Information"
+            },
+            "native": {}
+        },
+        {
+            "_id": "info.connection",
+            "type": "state",
+            "common": {
+                "role": "indicator.connected",
+                "name": "Google Calendar reachable",
+                "type": "boolean",
+                "read": true,
+                "write": false,
+                "def": false
+            },
+            "native": {}
+        },
+        {
+            "_id": "table",
+            "type": "state",
+            "common": {
+                "role": "json",
+                "name": "Calendar entries (ical-compatible JSON)",
+                "type": "string",
+                "read": true,
+                "write": false,
+                "def": "[]"
+            },
+            "native": {}
+        },
+        {
+            "_id": "upcoming",
+            "type": "state",
+            "common": {
+                "role": "json",
+                "name": "Next entries (list widget JSON)",
+                "type": "string",
+                "read": true,
+                "write": false,
+                "def": "[]"
+            },
+            "native": {}
+        }
+    ]
+}

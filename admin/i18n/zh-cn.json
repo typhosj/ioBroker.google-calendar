@@ -1,0 +1,20 @@
+{
+    "0 to 366 days.": "0 到 366 天。",
+    "Appointment": "预约",
+    "Birthday": "生日",
+    "Calendar ID": "日历ID",
+    "Calendar ID: Google Calendar settings, section 'Integrate calendar'. Share each calendar with the service account address.": "日历 ID：Google 日历设置，“集成日历”部分。与服务帐户地址共享每个日历。",
+    "Calendars": "日历",
+    "Colour": "颜色",
+    "Days ahead": "未来几天",
+    "Days in the past": "过去的日子",
+    "How often all calendars are read. 1 to 60 minutes.": "所有日历的阅读频率。 1 至 60 分钟。",
+    "Name": "姓名",
+    "Paste the whole content of the JSON key file of the Google service account. It is stored encrypted.": "粘贴 Google 服务帐户的 JSON 密钥文件的全部内容。它是加密存储的。",
+    "Poll interval (min)": "轮询间隔（分钟）",
+    "Reminder": "提醒",
+    "Service account key (JSON)": "服务帐户密钥 (JSON)",
+    "Type": "类型",
+    "Writable": "可写",
+    "google-calendar adapter settings": "google-calendar的适配器设置"
+}

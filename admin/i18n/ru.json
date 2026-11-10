@@ -1,0 +1,20 @@
+{
+    "0 to 366 days.": "От 0 до 366 дней.",
+    "Appointment": "Встреча",
+    "Birthday": "День рождения",
+    "Calendar ID": "Идентификатор календаря",
+    "Calendar ID: Google Calendar settings, section 'Integrate calendar'. Share each calendar with the service account address.": "Идентификатор календаря: настройки Календаря Google, раздел «Интегрировать календарь». Поделитесь каждым календарем с адресом учетной записи службы.",
+    "Calendars": "Календари",
+    "Colour": "Цвет",
+    "Days ahead": "Дни вперед",
+    "Days in the past": "Дни в прошлом",
+    "How often all calendars are read. 1 to 60 minutes.": "Как часто читаются все календари. от 1 до 60 минут.",
+    "Name": "Имя",
+    "Paste the whole content of the JSON key file of the Google service account. It is stored encrypted.": "Вставьте все содержимое файла ключей JSON учетной записи службы Google. Он хранится в зашифрованном виде.",
+    "Poll interval (min)": "Интервал опроса (мин)",
+    "Reminder": "Напоминание",
+    "Service account key (JSON)": "Ключ сервисного аккаунта (JSON)",
+    "Type": "Тип",
+    "Writable": "записываемый",
+    "google-calendar adapter settings": "Настройки адаптера для google-calendar"
+}

@@ -1,0 +1,20 @@
+{
+    "0 to 366 days.": "0 a 366 dias.",
+    "Appointment": "Encontro",
+    "Birthday": "Aniversário",
+    "Calendar ID": "ID do calendário",
+    "Calendar ID: Google Calendar settings, section 'Integrate calendar'. Share each calendar with the service account address.": "ID do calendário: configurações do Google Agenda, seção 'Integrar calendário'. Compartilhe cada calendário com o endereço da conta de serviço.",
+    "Calendars": "Calendários",
+    "Colour": "Cor",
+    "Days ahead": "Dias à frente",
+    "Days in the past": "Dias no passado",
+    "How often all calendars are read. 1 to 60 minutes.": "Com que frequência todos os calendários são lidos. 1 a 60 minutos.",
+    "Name": "Nome",
+    "Paste the whole content of the JSON key file of the Google service account. It is stored encrypted.": "Cole todo o conteúdo do arquivo de chave JSON da conta de serviço do Google. Ele é armazenado criptografado.",
+    "Poll interval (min)": "Intervalo de pesquisa (min)",
+    "Reminder": "Lembrete",
+    "Service account key (JSON)": "Chave da conta de serviço (JSON)",
+    "Type": "Tipo",
+    "Writable": "Gravável",
+    "google-calendar adapter settings": "Configurações do adaptador para google-calendar"
+}

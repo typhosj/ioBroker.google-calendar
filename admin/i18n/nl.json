@@ -1,0 +1,20 @@
+{
+    "0 to 366 days.": "0 tot 366 dagen.",
+    "Appointment": "Afspraak",
+    "Birthday": "Verjaardag",
+    "Calendar ID": "Agenda-ID",
+    "Calendar ID: Google Calendar settings, section 'Integrate calendar'. Share each calendar with the service account address.": "Agenda-ID: Google Agenda-instellingen, sectie 'Agenda integreren'. Deel elke agenda met het serviceaccountadres.",
+    "Calendars": "Kalenders",
+    "Colour": "Kleur",
+    "Days ahead": "Dagen vooruit",
+    "Days in the past": "Dagen in het verleden",
+    "How often all calendars are read. 1 to 60 minutes.": "Hoe vaak alle kalenders worden gelezen. 1 tot 60 minuten.",
+    "Name": "Naam",
+    "Paste the whole content of the JSON key file of the Google service account. It is stored encrypted.": "Plak de volledige inhoud van het JSON-sleutelbestand van het Google-serviceaccount. Het wordt versleuteld opgeslagen.",
+    "Poll interval (min)": "Poll-interval (min)",
+    "Reminder": "Herinnering",
+    "Service account key (JSON)": "Serviceaccountsleutel (JSON)",
+    "Type": "Type",
+    "Writable": "Beschrijfbaar",
+    "google-calendar adapter settings": "Adapterinstellingen voor google-calendar"
+}

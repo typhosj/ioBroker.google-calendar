@@ -1,0 +1,20 @@
+{
+    "0 to 366 days.": "Від 0 до 366 днів.",
+    "Appointment": "Призначення",
+    "Birthday": "день народження",
+    "Calendar ID": "ID календаря",
+    "Calendar ID: Google Calendar settings, section 'Integrate calendar'. Share each calendar with the service account address.": "Ідентифікатор календаря: налаштування календаря Google, розділ «Інтегрувати календар». Спільний доступ до кожного календаря з адресою облікового запису служби.",
+    "Calendars": "Календарі",
+    "Colour": "Колір",
+    "Days ahead": "Дні вперед",
+    "Days in the past": "Дні в минулому",
+    "How often all calendars are read. 1 to 60 minutes.": "Як часто читаються всі календарі. 1 до 60 хвилин.",
+    "Name": "Ім'я",
+    "Paste the whole content of the JSON key file of the Google service account. It is stored encrypted.": "Вставте весь вміст файлу ключа JSON облікового запису служби Google. Він зберігається в зашифрованому вигляді.",
+    "Poll interval (min)": "Інтервал опитування (хв.)",
+    "Reminder": "Нагадування",
+    "Service account key (JSON)": "Ключ облікового запису служби (JSON)",
+    "Type": "Тип",
+    "Writable": "Можливість запису",
+    "google-calendar adapter settings": "Налаштування адаптера для google-calendar"
+}

@@ -1,0 +1,19 @@
+{
+    "Service account key (JSON)": "Service account key (JSON)",
+    "Paste the whole content of the JSON key file of the Google service account. It is stored encrypted.": "Paste the whole content of the JSON key file of the Google service account. It is stored encrypted.",
+    "Calendars": "Calendars",
+    "Calendar ID: Google Calendar settings, section 'Integrate calendar'. Share each calendar with the service account address.": "Calendar ID: Google Calendar settings, section 'Integrate calendar'. Share each calendar with the service account address.",
+    "Name": "Name",
+    "Calendar ID": "Calendar ID",
+    "Type": "Type",
+    "Appointment": "Appointment",
+    "Reminder": "Reminder",
+    "Birthday": "Birthday",
+    "Colour": "Colour",
+    "Writable": "Writable",
+    "Poll interval (min)": "Poll interval (min)",
+    "How often all calendars are read. 1 to 60 minutes.": "How often all calendars are read. 1 to 60 minutes.",
+    "Days in the past": "Days in the past",
+    "Days ahead": "Days ahead",
+    "0 to 366 days.": "0 to 366 days."
+}

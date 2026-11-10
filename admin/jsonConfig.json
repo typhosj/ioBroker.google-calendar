@@ -1,0 +1,120 @@
+{
+    "i18n": true,
+    "type": "panel",
+    "items": {
+        "serviceAccountKey": {
+            "type": "password",
+            "label": "Service account key (JSON)",
+            "help": "Paste the whole content of the JSON key file of the Google service account. It is stored encrypted.",
+            "xs": 12,
+            "sm": 12,
+            "md": 12,
+            "lg": 12,
+            "xl": 12
+        },
+        "calendars": {
+            "type": "table",
+            "label": "Calendars",
+            "help": "Calendar ID: Google Calendar settings, section 'Integrate calendar'. Share each calendar with the service account address.",
+            "newLine": true,
+            "xs": 12,
+            "sm": 12,
+            "md": 12,
+            "lg": 12,
+            "xl": 12,
+            "items": [
+                {
+                    "type": "text",
+                    "attr": "name",
+                    "title": "Name",
+                    "width": "20%",
+                    "maxLength": 50,
+                    "default": ""
+                },
+                {
+                    "type": "text",
+                    "attr": "calendarId",
+                    "title": "Calendar ID",
+                    "width": "40%",
+                    "maxLength": 200,
+                    "default": ""
+                },
+                {
+                    "type": "select",
+                    "attr": "type",
+                    "title": "Type",
+                    "width": "15%",
+                    "default": "appointment",
+                    "options": [
+                        {
+                            "label": "Appointment",
+                            "value": "appointment"
+                        },
+                        {
+                            "label": "Reminder",
+                            "value": "reminder"
+                        },
+                        {
+                            "label": "Birthday",
+                            "value": "birthday"
+                        }
+                    ]
+                },
+                {
+                    "type": "color",
+                    "attr": "color",
+                    "title": "Colour",
+                    "width": "10%",
+                    "default": "#4faba2"
+                },
+                {
+                    "type": "checkbox",
+                    "attr": "writable",
+                    "title": "Writable",
+                    "width": "15%",
+                    "default": false
+                }
+            ]
+        },
+        "pollMinutes": {
+            "type": "number",
+            "label": "Poll interval (min)",
+            "help": "How often all calendars are read. 1 to 60 minutes.",
+            "min": 1,
+            "max": 60,
+            "default": 5,
+            "newLine": true,
+            "xs": 12,
+            "sm": 4,
+            "md": 4,
+            "lg": 4,
+            "xl": 4
+        },
+        "daysPast": {
+            "type": "number",
+            "label": "Days in the past",
+            "help": "0 to 366 days.",
+            "min": 0,
+            "max": 366,
+            "default": 30,
+            "xs": 12,
+            "sm": 4,
+            "md": 4,
+            "lg": 4,
+            "xl": 4
+        },
+        "daysPreview": {
+            "type": "number",
+            "label": "Days ahead",
+            "help": "0 to 366 days.",
+            "min": 0,
+            "max": 366,
+            "default": 150,
+            "xs": 12,
+            "sm": 4,
+            "md": 4,
+            "lg": 4,
+            "xl": 4
+        }
+    }
+}
