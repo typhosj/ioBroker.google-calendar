@@ -4,12 +4,12 @@ import { createTokenSource, type TokenSource } from './lib/auth';
 import { normalizeConfig, type Settings } from './lib/config';
 import { describeError, listEvents } from './lib/google';
 import { createHttp, type Http } from './lib/http';
+import { MAX_BACKOFF_MS, nextDelay, startLoop } from './lib/loop';
 import { sortRows, toRow, type Row } from './lib/rows';
 import { buildUpcoming } from './lib/upcoming';
 
 const DAY_MS = 86_400_000;
 const REQUEST_TIMEOUT_MS = 30_000;
-const MAX_BACKOFF_MS = 3_600_000;
 /** Key of the sign-in problem in `reported`; calendar problems use their calendar ID. */
 const SIGN_IN = '';
 
@@ -22,7 +22,7 @@ interface Google {
 class GoogleCalendar extends utils.Adapter {
     private google: Google | undefined;
     private readonly shutdown = new AbortController();
-    private timer: ioBroker.Timeout | undefined;
+    private loop: { stop: () => void } | undefined;
     private stopping = false;
     private failures = 0;
     /** Last good rows per calendar ID; a calendar that fails keeps its previous rows. */
@@ -50,13 +50,21 @@ class GoogleCalendar extends utils.Adapter {
         }
         const http = createHttp(REQUEST_TIMEOUT_MS, this.shutdown.signal);
         this.google = { settings, http, token: createTokenSource(settings.key, http) };
-        await this.cycle();
+        this.loop = startLoop(() => this.cycle(), {
+            set: (fn, ms) => this.setTimeout(fn, ms),
+            clear: handle => this.clearTimeout(handle),
+        });
     }
 
-    private async cycle(): Promise<void> {
+    /**
+     * One loop step: read, publish, and say how long to wait.
+     *
+     * @returns Delay in milliseconds until the next cycle
+     */
+    private async cycle(): Promise<number> {
         const google = this.google;
         if (this.stopping || !google) {
-            return;
+            return MAX_BACKOFF_MS;
         }
         try {
             const ok = await this.read(google);
@@ -66,14 +74,7 @@ class GoogleCalendar extends utils.Adapter {
             this.failures++;
             this.log.error(`Calendar cycle failed: ${describeError(error)}. Trying again later`);
         }
-        if (this.stopping) {
-            return;
-        }
-        const delay = Math.min(google.settings.pollMs * 2 ** Math.min(this.failures, 4), MAX_BACKOFF_MS);
-        this.timer = this.setTimeout(() => {
-            this.timer = undefined;
-            void this.cycle();
-        }, delay);
+        return nextDelay(google.settings.pollMs, this.failures);
     }
 
     /**
@@ -156,10 +157,7 @@ class GoogleCalendar extends utils.Adapter {
     private onUnload(callback: () => void): void {
         try {
             this.stopping = true;
-            if (this.timer) {
-                this.clearTimeout(this.timer);
-                this.timer = undefined;
-            }
+            this.loop?.stop();
             this.shutdown.abort();
         } finally {
             callback();
