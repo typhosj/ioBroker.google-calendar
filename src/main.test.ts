@@ -9,11 +9,16 @@ class FakeAdapter {
     readonly listeners = new Map<string, (arg: unknown) => unknown>();
     readonly writes: string[] = [];
     readonly errors: string[] = [];
+    readonly infos: string[] = [];
+    readonly states = new Map<string, unknown>();
+    readonly subscribed: string[] = [];
     /** Runs before each state write; a test uses it to start unload or to fail a write. */
     beforeWrite: (id: string) => void = () => undefined;
     readonly log = {
         warn: (): void => undefined,
-        info: (): void => undefined,
+        info: (message: string): void => {
+            this.infos.push(message);
+        },
         debug: (): void => undefined,
         error: (message: string): void => {
             this.errors.push(message);
@@ -29,10 +34,29 @@ class FakeAdapter {
         return this;
     }
 
-    setStateChangedAsync(id: string): Promise<void> {
+    getStateAsync(id: string): Promise<{ val: unknown; ack: boolean } | null> {
+        return Promise.resolve(this.states.has(id) ? { val: this.states.get(id), ack: true } : null);
+    }
+
+    setStateAsync(id: string, value: unknown): Promise<void> {
+        return this.write(id, value);
+    }
+
+    setStateChangedAsync(id: string, value?: unknown): Promise<void> {
+        return this.write(id, value);
+    }
+
+    subscribeStatesAsync(pattern: string): Promise<void> {
+        this.subscribed.push(pattern);
+        return Promise.resolve();
+    }
+
+    private write(id: string, value: unknown): Promise<void> {
         return Promise.resolve().then(() => {
             this.beforeWrite(id);
             this.writes.push(id);
+            const plain = value !== null && typeof value === 'object' && 'val' in value ? value.val : value;
+            this.states.set(id, plain);
         });
     }
 
@@ -49,6 +73,8 @@ class FakeAdapter {
 interface Internals {
     google: { settings: Settings; http: Http; token: TokenSource } | undefined;
     cycle(): Promise<number>;
+    loop: { stop: () => void; trigger: () => void } | undefined;
+    onStateChange(id: string, state: { val: unknown; ack: boolean } | null | undefined): Promise<void>;
 }
 
 // Load main.ts against the stand-in instead of the real adapter-core, then restore the module cache.
@@ -78,18 +104,55 @@ const settings: Settings = {
     pollMs: 60_000,
     daysPast: 1,
     daysPreview: 7,
-    writable: {},
+    writable: {
+        reminder: {
+            name: 'Erinnerungen',
+            calendarId: 'rem@example.test',
+            type: 'reminder',
+            color: '#f6bf26',
+            writable: true,
+        },
+    },
 };
 
-function startCycle(): { adapter: FakeAdapter; internals: Internals } {
+/**
+ * Builds an adapter with a fake Google transport.
+ *
+ * @param options insertStatus: status of the POST answer; holdInsert: keep the POST pending until releaseInsert()
+ * @param options.insertStatus Status of the POST answer
+ * @param options.holdInsert Keep the POST pending until releaseInsert()
+ */
+function startCycle(options: { insertStatus?: number; holdInsert?: boolean } = {}): {
+    adapter: FakeAdapter;
+    internals: Internals;
+    posts: { url: string }[];
+    triggered: () => number;
+    releaseInsert: () => void;
+} {
     const adapter = createAdapter({});
     const internals = adapter as unknown as Internals;
-    internals.google = {
-        settings,
-        http: () => Promise.resolve({ status: 200, body: { items: [] } }),
-        token: () => Promise.resolve('token'),
+    const posts: { url: string }[] = [];
+    let count = 0;
+    let release: () => void = () => undefined;
+    const held = new Promise<void>(resolve => {
+        release = resolve;
+    });
+    const http: Http = (url, request) => {
+        if (request?.method !== 'POST') {
+            return Promise.resolve({ status: 200, body: { items: [] } });
+        }
+        posts.push({ url });
+        const answer = { status: options.insertStatus ?? 200, body: { id: 'new1' } };
+        return options.holdInsert ? held.then(() => answer) : Promise.resolve(answer);
     };
-    return { adapter, internals };
+    internals.google = { settings, http, token: () => Promise.resolve('token') };
+    internals.loop = {
+        stop: () => undefined,
+        trigger: () => {
+            count++;
+        },
+    };
+    return { adapter, internals, posts, triggered: () => count, releaseInsert: release };
 }
 
 function unload(adapter: FakeAdapter): void {
@@ -137,5 +200,105 @@ describe('cycle and unload', () => {
         await internals.cycle();
         expect(adapter.errors).to.have.length(1);
         expect(adapter.errors[0]).to.contain('Calendar cycle failed');
+    });
+});
+
+describe('draft', () => {
+    const ID = 'google-calendar.0.draft.';
+    /**
+     * Sets draft states directly.
+     *
+     * @param adapter Stand-in adapter
+     * @param draft Field values by name
+     */
+    function fill(adapter: FakeAdapter, draft: Record<string, unknown>): void {
+        for (const [key, value] of Object.entries(draft)) {
+            adapter.states.set(`draft.${key}`, value);
+        }
+    }
+
+    it('fills in defaults when the dialog opens', async () => {
+        const { adapter, internals } = startCycle();
+        await internals.onStateChange(`${ID}open`, { val: true, ack: false });
+        expect(adapter.states.get('draft.text')).to.equal('');
+        expect(adapter.states.get('draft.startTime')).to.match(/^\d{2}:00$/);
+        expect(adapter.states.get('draft.result')).to.equal('');
+    });
+
+    it('creates a valid reminder, resets the form, closes the dialog and reads again', async () => {
+        const { adapter, internals, posts, triggered } = startCycle();
+        fill(adapter, {
+            type: 'reminder',
+            text: 'Test',
+            startDate: '2026-11-12',
+            startTime: '08:00',
+            endDate: '',
+            endTime: '',
+            allDay: false,
+        });
+        await internals.onStateChange(`${ID}save`, { val: true, ack: false });
+        expect(posts).to.have.length(1);
+        expect(posts[0].url).to.contain('/calendars/rem%40example.test/events');
+        expect(adapter.states.get('draft.result')).to.equal('ok');
+        expect(adapter.states.get('draft.text')).to.equal('');
+        expect(adapter.states.get('draft.open')).to.equal(false);
+        expect(triggered()).to.equal(1);
+        expect(adapter.infos.join(' ')).to.not.contain('Test');
+    });
+
+    it('reports an invalid draft without calling Google', async () => {
+        const { adapter, internals, posts } = startCycle();
+        fill(adapter, { type: 'reminder', text: '', startDate: '2026-11-12', startTime: '08:00' });
+        await internals.onStateChange(`${ID}save`, { val: true, ack: false });
+        expect(posts).to.have.length(0);
+        expect(adapter.states.get('draft.result')).to.equal('Bitte einen Text eingeben.');
+    });
+
+    it('reports a type without writable calendar', async () => {
+        const { adapter, internals, posts } = startCycle();
+        fill(adapter, { type: 'birthday', text: 'Ben', startDate: '2026-11-15' });
+        await internals.onStateChange(`${ID}save`, { val: true, ack: false });
+        expect(posts).to.have.length(0);
+        expect(adapter.states.get('draft.result')).to.contain('kein beschreibbarer Kalender');
+    });
+
+    it('reports a refused insert in German', async () => {
+        const { adapter, internals } = startCycle({ insertStatus: 403 });
+        fill(adapter, { type: 'reminder', text: 'Test', startDate: '2026-11-12', startTime: '08:00' });
+        await internals.onStateChange(`${ID}save`, { val: true, ack: false });
+        expect(adapter.states.get('draft.result')).to.contain('Freigabe');
+        expect(adapter.states.get('draft.open')).to.not.equal(false);
+    });
+
+    it('ignores acknowledged changes and false values', async () => {
+        const { internals, posts, adapter } = startCycle();
+        fill(adapter, { type: 'reminder', text: 'Test', startDate: '2026-11-12', startTime: '08:00' });
+        await internals.onStateChange(`${ID}save`, { val: true, ack: true });
+        await internals.onStateChange(`${ID}save`, { val: false, ack: false });
+        expect(posts).to.have.length(0);
+    });
+
+    it('ignores a second save while one is running', async () => {
+        const { adapter, internals, posts, releaseInsert } = startCycle({ holdInsert: true });
+        fill(adapter, { type: 'reminder', text: 'Test', startDate: '2026-11-12', startTime: '08:00' });
+        const first = internals.onStateChange(`${ID}save`, { val: true, ack: false });
+        await new Promise(resolve => setImmediate(resolve));
+        await internals.onStateChange(`${ID}save`, { val: true, ack: false });
+        expect(adapter.states.get('draft.result')).to.contain('läuft');
+        releaseInsert();
+        await first;
+        expect(posts).to.have.length(1);
+    });
+
+    it('writes nothing after unload starts during the insert', async () => {
+        const { adapter, internals, releaseInsert } = startCycle({ holdInsert: true });
+        fill(adapter, { type: 'reminder', text: 'Test', startDate: '2026-11-12', startTime: '08:00' });
+        const pending = internals.onStateChange(`${ID}save`, { val: true, ack: false });
+        await new Promise(resolve => setImmediate(resolve));
+        adapter.writes.length = 0;
+        unload(adapter);
+        releaseInsert();
+        await pending;
+        expect(adapter.writes).to.deep.equal([]);
     });
 });

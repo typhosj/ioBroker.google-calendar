@@ -133,6 +133,148 @@
                 "def": "[]"
             },
             "native": {}
+        },
+        {
+            "_id": "draft",
+            "type": "channel",
+            "common": {
+                "name": "New entry (form of the vis dialog)"
+            },
+            "native": {}
+        },
+        {
+            "_id": "draft.type",
+            "type": "state",
+            "common": {
+                "role": "text",
+                "name": "Type",
+                "type": "string",
+                "read": true,
+                "write": true,
+                "def": "reminder",
+                "states": {
+                    "appointment": "Termin",
+                    "reminder": "Erinnerung",
+                    "birthday": "Geburtstag"
+                }
+            },
+            "native": {}
+        },
+        {
+            "_id": "draft.text",
+            "type": "state",
+            "common": {
+                "role": "text",
+                "name": "Text or name",
+                "type": "string",
+                "read": true,
+                "write": true,
+                "def": ""
+            },
+            "native": {}
+        },
+        {
+            "_id": "draft.startDate",
+            "type": "state",
+            "common": {
+                "role": "date",
+                "name": "Date (YYYY-MM-DD)",
+                "type": "string",
+                "read": true,
+                "write": true,
+                "def": ""
+            },
+            "native": {}
+        },
+        {
+            "_id": "draft.startTime",
+            "type": "state",
+            "common": {
+                "role": "text",
+                "name": "Time (HH:MM)",
+                "type": "string",
+                "read": true,
+                "write": true,
+                "def": ""
+            },
+            "native": {}
+        },
+        {
+            "_id": "draft.endDate",
+            "type": "state",
+            "common": {
+                "role": "date",
+                "name": "End date (YYYY-MM-DD, appointments)",
+                "type": "string",
+                "read": true,
+                "write": true,
+                "def": ""
+            },
+            "native": {}
+        },
+        {
+            "_id": "draft.endTime",
+            "type": "state",
+            "common": {
+                "role": "text",
+                "name": "End time (HH:MM, appointments)",
+                "type": "string",
+                "read": true,
+                "write": true,
+                "def": ""
+            },
+            "native": {}
+        },
+        {
+            "_id": "draft.allDay",
+            "type": "state",
+            "common": {
+                "role": "switch",
+                "name": "All day (appointments)",
+                "type": "boolean",
+                "read": true,
+                "write": true,
+                "def": false
+            },
+            "native": {}
+        },
+        {
+            "_id": "draft.open",
+            "type": "state",
+            "common": {
+                "role": "switch",
+                "name": "Dialog open (true fills in defaults)",
+                "type": "boolean",
+                "read": true,
+                "write": true,
+                "def": false
+            },
+            "native": {}
+        },
+        {
+            "_id": "draft.save",
+            "type": "state",
+            "common": {
+                "role": "button",
+                "name": "Save the entry",
+                "type": "boolean",
+                "read": false,
+                "write": true
+            },
+            "native": {}
+        },
+        {
+            "_id": "draft.result",
+            "type": "state",
+            "common": {
+                "role": "text",
+                "name": "Result of the last save",
+                "type": "string",
+                "read": true,
+                "write": false,
+                "def": ""
+            },
+            "native": {}
         }
     ]
 }

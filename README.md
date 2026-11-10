@@ -39,6 +39,20 @@ Reads events from one or more [Google Calendar](https://calendar.google.com) cal
 | `info.connection` | true while at least one calendar could be read in the last cycle. |
 | `table` | JSON array with all entries of all calendars, sorted by start. |
 | `upcoming` | JSON array with the next entries, ready for a list widget. |
+| `draft.type` | Type of the new entry: `appointment`, `reminder` or `birthday`. |
+| `draft.text` | Title or name of the new entry. |
+| `draft.startDate` | Date, `YYYY-MM-DD`. |
+| `draft.startTime` | Time, `HH:MM`. |
+| `draft.endDate` | End date, `YYYY-MM-DD` (appointments). |
+| `draft.endTime` | End time, `HH:MM` (appointments). |
+| `draft.allDay` | All-day entry (appointments). |
+| `draft.open` | Set to true to fill the form with defaults; set to false again after a successful save. |
+| `draft.save` | Button: creates the entry from the form. |
+| `draft.result` | `ok`, or the reason the last save failed (German, for the dialog). |
+
+### Creating entries
+
+Set `draft.open` to true: the form states are filled with defaults (next full hour, one hour long). Edit the `draft.*` fields, then press `draft.save`. The entry is created in the writable calendar configured for its type and the calendars are read again right away. `draft.result` holds `ok` or the reason for a failure; after success the text is cleared and `draft.open` is set to false.
 
 ## Changelog
 <!--

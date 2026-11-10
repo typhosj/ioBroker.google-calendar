@@ -2,7 +2,8 @@ import * as utils from '@iobroker/adapter-core';
 
 import { createTokenSource, type TokenSource } from './lib/auth';
 import { normalizeConfig, type Settings } from './lib/config';
-import { describeError, listEvents } from './lib/google';
+import { buildEvent, draftDefaults, saveErrorText, type Draft } from './lib/draft';
+import { describeError, insertEvent, listEvents } from './lib/google';
 import { createHttp, type Http } from './lib/http';
 import { MAX_BACKOFF_MS, nextDelay, startLoop } from './lib/loop';
 import { sortRows, toRow, type Row } from './lib/rows';
@@ -12,6 +13,7 @@ const DAY_MS = 86_400_000;
 const REQUEST_TIMEOUT_MS = 30_000;
 /** Key of the sign-in problem in `reported`; calendar problems use their calendar ID. */
 const SIGN_IN = '';
+const DRAFT_FIELDS = ['type', 'text', 'startDate', 'startTime', 'endDate', 'endTime', 'allDay'] as const;
 
 interface Google {
     settings: Settings;
@@ -22,8 +24,9 @@ interface Google {
 class GoogleCalendar extends utils.Adapter {
     private google: Google | undefined;
     private readonly shutdown = new AbortController();
-    private loop: { stop: () => void } | undefined;
+    private loop: { stop: () => void; trigger: () => void } | undefined;
     private stopping = false;
+    private saving = false;
     private failures = 0;
     /** Last good rows per calendar ID; a calendar that fails keeps its previous rows. */
     private readonly rowsByCalendar = new Map<string, Row[]>();
@@ -54,6 +57,85 @@ class GoogleCalendar extends utils.Adapter {
             set: (fn, ms) => this.setTimeout(fn, ms),
             clear: handle => this.clearTimeout(handle),
         });
+        this.on('stateChange', (id, state) => {
+            this.onStateChange(id, state).catch((error: unknown) => {
+                this.log.error(`Handling ${id} failed: ${describeError(error)}`);
+            });
+        });
+        await this.subscribeStatesAsync('draft.open');
+        await this.subscribeStatesAsync('draft.save');
+    }
+
+    /**
+     * Reacts to a user command on the draft states.
+     *
+     * @param id Full state ID
+     * @param state New state
+     */
+    private async onStateChange(id: string, state: ioBroker.State | null | undefined): Promise<void> {
+        if (!state || state.ack || state.val !== true || this.stopping) {
+            return;
+        }
+        if (id.endsWith('.draft.open')) {
+            const defaults = draftDefaults(new Date());
+            for (const [key, value] of Object.entries(defaults)) {
+                await this.setStateAsync(`draft.${key}`, value, true);
+            }
+            await this.setStateAsync('draft.result', '', true);
+            await this.setStateAsync('draft.open', true, true);
+        } else if (id.endsWith('.draft.save')) {
+            await this.save();
+        }
+    }
+
+    /** Validates the draft, creates the event and reports the outcome in `draft.result`. */
+    private async save(): Promise<void> {
+        const google = this.google;
+        if (!google) {
+            return;
+        }
+        if (this.saving) {
+            await this.setStateAsync('draft.result', 'Speichern läuft noch …', true);
+            return;
+        }
+        this.saving = true;
+        try {
+            const draft = Object.fromEntries(
+                await Promise.all(
+                    DRAFT_FIELDS.map(async key => [key, (await this.getStateAsync(`draft.${key}`))?.val]),
+                ),
+            ) as unknown as Draft;
+            const result = buildEvent(draft);
+            if (!result.ok) {
+                await this.setStateAsync('draft.result', result.error, true);
+                return;
+            }
+            const calendar = google.settings.writable[result.type];
+            if (!calendar) {
+                await this.setStateAsync(
+                    'draft.result',
+                    'Für diesen Typ ist kein beschreibbarer Kalender eingerichtet.',
+                    true,
+                );
+                return;
+            }
+            await insertEvent(google.http, await google.token(), calendar.calendarId, result.body);
+            if (this.stopping) {
+                return;
+            }
+            this.log.info(`Created a ${result.type} in calendar "${calendar.name}"`);
+            await this.setStateAsync('draft.result', 'ok', true);
+            await this.setStateAsync('draft.text', '', true);
+            await this.setStateAsync('draft.open', false, true);
+            this.loop?.trigger();
+        } catch (error) {
+            if (!this.stopping) {
+                this.log.warn(`Creating an entry failed: ${describeError(error)}`);
+                await this.setStateAsync('draft.result', saveErrorText(error), true);
+            }
+        } finally {
+            this.saving = false;
+        }
     }
 
     /**
