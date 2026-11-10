@@ -40,13 +40,6 @@ export class GoogleError extends Error {
 /**
  * fetch with a per-request timeout, an adapter-wide stop signal and a body size cap.
  *
- * @param timeoutMs
- * @param stop
- * @param fetchFn
- */
-/**
- * fetch with a per-request timeout, an adapter-wide stop signal and a body size cap.
- *
  * @param timeoutMs Timeout per request in milliseconds.
  * @param stop Adapter-wide signal that aborts all requests on unload.
  * @param fetchFn Fetch implementation, injectable for tests.

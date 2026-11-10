@@ -72,7 +72,9 @@ class GoogleCalendar extends utils.Adapter {
             await this.publishUpcoming();
         } catch (error) {
             this.failures++;
-            this.log.error(`Calendar cycle failed: ${describeError(error)}. Trying again later`);
+            if (!this.stopping) {
+                this.log.error(`Calendar cycle failed: ${describeError(error)}. Trying again later`);
+            }
         }
         return nextDelay(google.settings.pollMs, this.failures);
     }
@@ -117,7 +119,7 @@ class GoogleCalendar extends utils.Adapter {
             }
         }
         await this.setConnection(anyOk);
-        if (anyOk) {
+        if (anyOk && !this.stopping) {
             await this.setStateChangedAsync('table', JSON.stringify(this.rows()), true);
         }
         return anyOk;
