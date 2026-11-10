@@ -1,5 +1,5 @@
 import { expect } from 'chai';
-import { describeError, listEvents, MAX_PAGES, parseEvent } from './google';
+import { describeError, insertEvent, listEvents, MAX_PAGES, parseEvent } from './google';
 import { GoogleError, type Http } from './http';
 
 const T0 = new Date('2026-11-01T00:00:00Z');
@@ -105,5 +105,42 @@ describe('describeError', () => {
         );
         expect(describeError(new Error('timeout'))).to.equal('timeout');
         expect(describeError('odd')).to.equal('odd');
+    });
+});
+
+describe('insertEvent', () => {
+    const body = {
+        summary: 'Test',
+        start: { date: '2026-11-12' },
+        end: { date: '2026-11-13' },
+        reminders: { useDefault: true as const },
+    };
+
+    it('posts JSON with the token and returns the new ID', async () => {
+        const seen: { url: string; request?: { method?: string; headers?: Record<string, string>; body?: string } }[] =
+            [];
+        const http: Http = (url, request) => {
+            seen.push({ url, request });
+            return Promise.resolve({ status: 200, body: { id: 'new1' } });
+        };
+        expect(await insertEvent(http, 'tok', 'a@b', body)).to.equal('new1');
+        expect(new URL(seen[0].url).pathname).to.equal('/calendar/v3/calendars/a%40b/events');
+        expect(seen[0].request?.method).to.equal('POST');
+        expect(seen[0].request?.headers).to.deep.equal({
+            authorization: 'Bearer tok',
+            'content-type': 'application/json',
+        });
+        expect(JSON.parse(seen[0].request?.body ?? '')).to.deep.equal(body);
+    });
+
+    it('throws a GoogleError on a refusal or an answer without ID', async () => {
+        const refuse: Http = () => Promise.resolve({ status: 403, body: {} });
+        const error = await insertEvent(refuse, 'tok', 'c', body).then(
+            () => null,
+            (e: unknown) => e,
+        );
+        expect((error as GoogleError).status).to.equal(403);
+        const noId: Http = () => Promise.resolve({ status: 200, body: {} });
+        await expect(insertEvent(noId, 'tok', 'c', body)).to.be.rejectedWith(GoogleError);
     });
 });

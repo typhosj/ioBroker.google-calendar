@@ -38,6 +38,8 @@ export interface Settings {
     daysPast: number;
     /** Days of upcoming events to keep. */
     daysPreview: number;
+    /** First writable calendar per entry type; a type without one is not written. */
+    writable: Partial<Record<EntryType, CalendarConfig>>;
 }
 
 const MINUTE_MS = 60_000;
@@ -131,6 +133,26 @@ function parseCalendars(value: unknown, errors: string[]): CalendarConfig[] {
 }
 
 /**
+ * First writable calendar per type; a second one for the same type is reported and skipped.
+ *
+ * @param calendars Valid calendars, in config order
+ * @param errors Collects the warnings
+ */
+function writableByType(calendars: CalendarConfig[], errors: string[]): Partial<Record<EntryType, CalendarConfig>> {
+    const writable: Partial<Record<EntryType, CalendarConfig>> = {};
+    for (const calendar of calendars.filter(c => c.writable)) {
+        if (writable[calendar.type]) {
+            errors.push(
+                `Calendar "${calendar.name}": second writable calendar of type ${calendar.type}, it will not be written`,
+            );
+        } else {
+            writable[calendar.type] = calendar;
+        }
+    }
+    return writable;
+}
+
+/**
  * Validates and clamps the instance settings; the UI checks are convenience only.
  *
  * @param native Raw `native` object of the instance, untrusted.
@@ -138,12 +160,14 @@ function parseCalendars(value: unknown, errors: string[]): CalendarConfig[] {
 export function normalizeConfig(native: unknown): { settings: Settings; errors: string[] } {
     const record = asRecord(native);
     const errors: string[] = [];
+    const calendars = parseCalendars(record.calendars, errors);
     const settings: Settings = {
         key: parseKey(record.serviceAccountKey, errors),
-        calendars: parseCalendars(record.calendars, errors),
+        calendars,
         pollMs: clampInt(record.pollMinutes, 1, 60, 5, 'pollMinutes', errors) * MINUTE_MS,
         daysPast: clampInt(record.daysPast, 0, 366, 30, 'daysPast', errors),
         daysPreview: clampInt(record.daysPreview, 0, 366, 150, 'daysPreview', errors),
+        writable: writableByType(calendars, errors),
     };
     return { settings, errors };
 }

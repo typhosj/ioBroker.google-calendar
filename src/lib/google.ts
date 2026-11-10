@@ -153,3 +153,24 @@ export function describeError(error: unknown): string {
     }
     return error instanceof Error ? error.message : String(error);
 }
+
+/**
+ * Creates one event; resolves with its ID.
+ *
+ * @param http Transport for the API request.
+ * @param token Bearer access token.
+ * @param calendarId Calendar ID, URL-encoded here.
+ * @param body Event to create.
+ */
+export async function insertEvent(http: Http, token: string, calendarId: string, body: EventBody): Promise<string> {
+    const response = await http(`${API_BASE}/calendars/${encodeURIComponent(calendarId)}/events`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+    });
+    const record = asRecord(response.body);
+    if (response.status !== 200 || typeof record.id !== 'string' || !record.id) {
+        throw new GoogleError(`Creating the event failed (HTTP ${response.status})`, response.status);
+    }
+    return record.id;
+}

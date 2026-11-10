@@ -127,3 +127,23 @@ describe('normalizeConfig', () => {
         expect(settings.calendars).to.deep.equal([]);
     });
 });
+
+describe('writable calendars', () => {
+    it('maps each type to its first writable calendar and warns about a second one', () => {
+        const { settings, errors } = normalizeConfig({
+            serviceAccountKey: KEY,
+            calendars: [
+                { ...CAL, name: 'Termine', calendarId: 't@x', writable: true },
+                { ...CAL, name: 'Manuel', calendarId: 'm@x', writable: false },
+                { ...CAL, name: 'Noch einer', calendarId: 'n@x', writable: true },
+                { ...CAL, name: 'Erinnerungen', calendarId: 'e@x', type: 'reminder', writable: true },
+            ],
+        });
+        expect(settings.writable.appointment?.name).to.equal('Termine');
+        expect(settings.writable.reminder?.name).to.equal('Erinnerungen');
+        expect(settings.writable.birthday).to.equal(undefined);
+        expect(errors).to.deep.equal([
+            'Calendar "Noch einer": second writable calendar of type appointment, it will not be written',
+        ]);
+    });
+});

@@ -129,3 +129,72 @@ describe('startLoop', () => {
         expect([...timers.pending.values()].map(t => t.ms)).to.include(500);
     });
 });
+
+describe('startLoop trigger', () => {
+    function triggerTimers(): {
+        armed: { fn: () => void; ms: number }[];
+        cleared: () => number;
+        timers: { set: (fn: () => void, ms: number) => number; clear: (handle: number) => void };
+    } {
+        const armed: { fn: () => void; ms: number }[] = [];
+        let cleared = 0;
+        return {
+            armed,
+            cleared: () => cleared,
+            timers: {
+                set: (fn, ms) => armed.push({ fn, ms }) - 1,
+                clear: () => {
+                    cleared++;
+                },
+            },
+        };
+    }
+    const settle = (): Promise<void> => new Promise(resolve => setImmediate(resolve));
+
+    it('runs at once while waiting and clears the armed timer', async () => {
+        let runs = 0;
+        const t = triggerTimers();
+        const loop = startLoop(() => Promise.resolve(++runs && 500), t.timers);
+        await settle();
+        loop.trigger();
+        await settle();
+        expect(runs).to.equal(2);
+        expect(t.cleared()).to.equal(1);
+        loop.stop();
+    });
+
+    it('runs once more right after a running step, however often it is triggered', async () => {
+        let runs = 0;
+        let release: () => void = () => undefined;
+        const t = triggerTimers();
+        const loop = startLoop(
+            () =>
+                new Promise<number>(resolve => {
+                    runs++;
+                    release = () => resolve(500);
+                }),
+            t.timers,
+        );
+        loop.trigger();
+        loop.trigger();
+        release();
+        await settle();
+        expect(runs).to.equal(2);
+        release();
+        await settle();
+        expect(runs).to.equal(2);
+        expect(t.armed).to.have.length(1);
+        loop.stop();
+    });
+
+    it('does nothing after stop', async () => {
+        let runs = 0;
+        const t = triggerTimers();
+        const loop = startLoop(() => Promise.resolve(++runs && 500), t.timers);
+        await settle();
+        loop.stop();
+        loop.trigger();
+        await settle();
+        expect(runs).to.equal(1);
+    });
+});

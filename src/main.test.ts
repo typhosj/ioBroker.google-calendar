@@ -78,6 +78,7 @@ const settings: Settings = {
     pollMs: 60_000,
     daysPast: 1,
     daysPreview: 7,
+    writable: {},
 };
 
 function startCycle(): { adapter: FakeAdapter; internals: Internals } {

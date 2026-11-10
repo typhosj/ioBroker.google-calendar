@@ -14,6 +14,7 @@ export function nextDelay(pollMs: number, failures: number): number {
  * Runs `step` now and again after the delay it resolves with. The next run is armed only after the
  * current step settled, so runs never overlap. A rejecting step does not escape: the last known delay
  * is reused, one hour before any delay is known. Steps should still handle their own errors.
+ * `trigger` runs a step now; while a step runs, it schedules exactly one more right after it.
  *
  * @param step One cycle; resolves with the delay in milliseconds until the next one
  * @param timers Timer functions, generic over the handle type
@@ -23,12 +24,15 @@ export function nextDelay(pollMs: number, failures: number): number {
 export function startLoop<T>(
     step: () => Promise<number>,
     timers: { set: (fn: () => void, ms: number) => T; clear: (handle: T) => void },
-): { stop: () => void } {
+): { stop: () => void; trigger: () => void } {
     let stopped = false;
+    let running = false;
+    let again = false;
     let handle: T | undefined;
     let lastDelay = MAX_BACKOFF_MS;
     const run = (): void => {
         handle = undefined;
+        running = true;
         void step()
             .then(
                 delay => {
@@ -37,9 +41,16 @@ export function startLoop<T>(
                 () => undefined,
             )
             .then(() => {
-                if (!stopped) {
-                    handle = timers.set(run, lastDelay);
+                running = false;
+                if (stopped) {
+                    return;
                 }
+                if (again) {
+                    again = false;
+                    run();
+                    return;
+                }
+                handle = timers.set(run, lastDelay);
             });
     };
     run();
@@ -50,6 +61,20 @@ export function startLoop<T>(
                 timers.clear(handle);
                 handle = undefined;
             }
+        },
+        trigger: () => {
+            if (stopped) {
+                return;
+            }
+            if (running) {
+                again = true;
+                return;
+            }
+            if (handle !== undefined) {
+                timers.clear(handle);
+                handle = undefined;
+            }
+            run();
         },
     };
 }
