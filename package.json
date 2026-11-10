@@ -61,6 +61,7 @@
     "test:ts": "mocha --config test/mocharc.custom.json src/**/*.test.ts",
     "test:package": "mocha test/package --exit",
     "test:integration": "mocha test/integration --exit",
+    "pr:objects": "npm run build && npm run test:integration && npx --yes --package @iobroker/repochecker -- node tools/checkObjectStructure.js",
     "test": "npm run test:ts && npm run test:package",
     "check": "tsc --noEmit",
     "lint": "eslint -c eslint.config.mjs .",

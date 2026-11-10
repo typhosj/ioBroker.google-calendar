@@ -1,167 +1,172 @@
-/*
- * Created with @iobroker/create-adapter v3.1.5
- */
-
-// The adapter-core module gives you access to the core ioBroker functions
-// you need to create an adapter
 import * as utils from '@iobroker/adapter-core';
 
-// Load your modules here, e.g.:
-// import * as fs from 'fs';
+import { createTokenSource, type TokenSource } from './lib/auth';
+import { normalizeConfig, type Settings } from './lib/config';
+import { describeError, listEvents } from './lib/google';
+import { createHttp, type Http } from './lib/http';
+import { sortRows, toRow, type Row } from './lib/rows';
+import { buildUpcoming } from './lib/upcoming';
+
+const DAY_MS = 86_400_000;
+const REQUEST_TIMEOUT_MS = 30_000;
+const MAX_BACKOFF_MS = 3_600_000;
+/** Key of the sign-in problem in `reported`; calendar problems use their calendar ID. */
+const SIGN_IN = '';
+
+interface Google {
+    settings: Settings;
+    http: Http;
+    token: TokenSource;
+}
 
 class GoogleCalendar extends utils.Adapter {
+    private google: Google | undefined;
+    private readonly shutdown = new AbortController();
+    private timer: ioBroker.Timeout | undefined;
+    private stopping = false;
+    private failures = 0;
+    /** Last good rows per calendar ID; a calendar that fails keeps its previous rows. */
+    private readonly rowsByCalendar = new Map<string, Row[]>();
+    /** Problems already logged, so each one logs once until it recovers. */
+    private readonly reported = new Set<string>();
+
     public constructor(options: Partial<utils.AdapterOptions> = {}) {
-        super({
-            ...options,
-            name: 'google-calendar',
-        });
+        super({ ...options, name: 'google-calendar' });
         this.on('ready', this.onReady.bind(this));
-        this.on('stateChange', this.onStateChange.bind(this));
-        // this.on('objectChange', this.onObjectChange.bind(this));
-        // this.on('message', this.onMessage.bind(this));
         this.on('unload', this.onUnload.bind(this));
     }
 
-    /**
-     * Is called when databases are connected and adapter received configuration.
-     */
     private async onReady(): Promise<void> {
-        // Initialize your adapter here
+        await this.setStateChangedAsync('info.connection', false, true);
+        const { settings, errors } = normalizeConfig(this.config);
+        for (const error of errors) {
+            this.log.warn(error);
+        }
+        if (!settings.key || !settings.calendars.length) {
+            this.log.error(
+                'Not reading any calendar: enter the service account key and at least one valid calendar in the instance settings',
+            );
+            return;
+        }
+        const http = createHttp(REQUEST_TIMEOUT_MS, this.shutdown.signal);
+        this.google = { settings, http, token: createTokenSource(settings.key, http) };
+        await this.cycle();
+    }
 
-        // Reset the connection indicator during startup
-        await this.setState('info.connection', false, true);
-
-        // The adapters config (in the instance object everything under the attribute "native") is accessible via
-        // this.config:
-        this.log.debug('config pollMinutes: ${this.config.pollMinutes}');
-        this.log.debug('config daysPast: ${this.config.daysPast}');
-        this.log.debug('config daysPreview: ${this.config.daysPreview}');
-
-        /*
-		For every state in the system there has to be also an object of type state
-		Here a simple template for a boolean variable named "testVariable"
-		Because every adapter instance uses its own unique namespace variable names can't collide with other adapters variables
-
-		IMPORTANT: State roles should be chosen carefully based on the state's purpose.
-		           Please refer to the state roles documentation for guidance:
-		           https://www.iobroker.net/#en/documentation/dev/stateroles.md
-		*/
-        await this.setObjectNotExistsAsync('testVariable', {
-            type: 'state',
-            common: {
-                name: 'testVariable',
-                type: 'boolean',
-                role: 'indicator',
-                read: true,
-                write: true,
-            },
-            native: {},
-        });
-
-        // In order to get state updates, you need to subscribe to them. The following line adds a subscription for our variable we have created above.
-        this.subscribeStates('testVariable');
-        // You can also add a subscription for multiple states. The following line watches all states starting with "lights."
-        // this.subscribeStates('lights.*');
-        // Or, if you really must, you can also watch all states. Don't do this if you don't need to. Otherwise this will cause a lot of unnecessary load on the system:
-        // this.subscribeStates('*');
-
-        /*
-			setState examples
-			you will notice that each setState will cause the stateChange event to fire (because of above subscribeStates cmd)
-		*/
-        // the variable testVariable is set to true as command (ack=false)
-        await this.setState('testVariable', true);
-
-        // same thing, but the value is flagged "ack"
-        // ack should be always set to true if the value is received from or acknowledged from the target system
-        await this.setState('testVariable', { val: true, ack: true });
-
-        // same thing, but the state is deleted after 30s (getState will return null afterwards)
-        await this.setState('testVariable', { val: true, ack: true, expire: 30 });
-
-        // examples for the checkPassword/checkGroup functions
-        const pwdResult = await this.checkPasswordAsync('admin', 'iobroker');
-        this.log.info(`check user admin pw iobroker: ${JSON.stringify(pwdResult)}`);
-
-        const groupResult = await this.checkGroupAsync('admin', 'admin');
-        this.log.info(`check group user admin group admin: ${JSON.stringify(groupResult)}`);
+    private async cycle(): Promise<void> {
+        const google = this.google;
+        if (this.stopping || !google) {
+            return;
+        }
+        try {
+            const ok = await this.read(google);
+            this.failures = ok ? 0 : this.failures + 1;
+            await this.publishUpcoming();
+        } catch (error) {
+            this.failures++;
+            this.log.error(`Calendar cycle failed: ${describeError(error)}. Trying again later`);
+        }
+        if (this.stopping) {
+            return;
+        }
+        const delay = Math.min(google.settings.pollMs * 2 ** Math.min(this.failures, 4), MAX_BACKOFF_MS);
+        this.timer = this.setTimeout(() => {
+            this.timer = undefined;
+            void this.cycle();
+        }, delay);
     }
 
     /**
-     * Is called when adapter shuts down - callback has to be called under any circumstances!
+     * Reads every calendar.
      *
-     * @param callback - Callback function
+     * @param google Settings, transport and token source of this run
+     * @returns true when at least one calendar could be read
      */
+    private async read(google: Google): Promise<boolean> {
+        const now = Date.now();
+        const timeMin = new Date(now - google.settings.daysPast * DAY_MS);
+        const timeMax = new Date(now + google.settings.daysPreview * DAY_MS);
+        let token: string;
+        try {
+            token = await google.token();
+        } catch (error) {
+            this.report(SIGN_IN, `Google sign-in failed: ${describeError(error)}. Retrying with growing pauses`);
+            await this.setConnection(false);
+            return false;
+        }
+        this.recover(SIGN_IN, 'Google sign-in works again');
+        let anyOk = false;
+        for (const calendar of google.settings.calendars) {
+            try {
+                const events = await listEvents(google.http, token, calendar.calendarId, timeMin, timeMax);
+                this.rowsByCalendar.set(
+                    calendar.calendarId,
+                    events.map(event => toRow(event, calendar)),
+                );
+                this.recover(calendar.calendarId, `Calendar "${calendar.name}" can be read again`);
+                anyOk = true;
+            } catch (error) {
+                this.report(
+                    calendar.calendarId,
+                    `Calendar "${calendar.name}" could not be read: ${describeError(error)}. Keeping its last entries`,
+                );
+            }
+            if (this.stopping) {
+                return false;
+            }
+        }
+        await this.setConnection(anyOk);
+        if (anyOk) {
+            await this.setStateChangedAsync('table', JSON.stringify(this.rows()), true);
+        }
+        return anyOk;
+    }
+
+    /** Runs after every cycle, also a failed one, so "Heute"/"Morgen" follow the clock. */
+    private async publishUpcoming(): Promise<void> {
+        if (this.stopping || !this.rowsByCalendar.size) {
+            return;
+        }
+        await this.setStateChangedAsync('upcoming', JSON.stringify(buildUpcoming(this.rows(), new Date())), true);
+    }
+
+    private rows(): Row[] {
+        return sortRows([...this.rowsByCalendar.values()].flat());
+    }
+
+    private async setConnection(connected: boolean): Promise<void> {
+        if (!this.stopping) {
+            await this.setStateChangedAsync('info.connection', connected, true);
+        }
+    }
+
+    private report(key: string, message: string): void {
+        if (!this.stopping && !this.reported.has(key)) {
+            this.reported.add(key);
+            this.log.warn(message);
+        }
+    }
+
+    private recover(key: string, message: string): void {
+        if (this.reported.delete(key)) {
+            this.log.info(message);
+        }
+    }
+
     private onUnload(callback: () => void): void {
         try {
-            // Here you must clear all timeouts or intervals that may still be active
-            // clearTimeout(timeout1);
-            // clearTimeout(timeout2);
-            // ...
-            // clearInterval(interval1);
-
-            callback();
-        } catch (error) {
-            this.log.error(`Error during unloading: ${(error as Error).message}`);
-            callback();
-        }
-    }
-
-    // If you need to react to object changes, uncomment the following block and the corresponding line in the constructor.
-    // You also need to subscribe to the objects with `this.subscribeObjects`, similar to `this.subscribeStates`.
-    // /**
-    //  * Is called if a subscribed object changes
-    //  */
-    // private onObjectChange(id: string, obj: ioBroker.Object | null | undefined): void {
-    //     if (obj) {
-    //         // The object was changed
-    //         this.log.info(`object ${id} changed: ${JSON.stringify(obj)}`);
-    //     } else {
-    //         // The object was deleted
-    //         this.log.info(`object ${id} deleted`);
-    //     }
-    // }
-
-    /**
-     * Is called if a subscribed state changes
-     *
-     * @param id - State ID
-     * @param state - State object
-     */
-    private onStateChange(id: string, state: ioBroker.State | null | undefined): void {
-        if (state) {
-            // The state was changed
-            this.log.info(`state ${id} changed: ${state.val} (ack = ${state.ack})`);
-
-            if (state.ack === false) {
-                // This is a command from the user (e.g., from the UI or other adapter)
-                // and should be processed by the adapter
-                this.log.info(`User command received for ${id}: ${state.val}`);
-
-                // TODO: Add your control logic here
+            this.stopping = true;
+            if (this.timer) {
+                this.clearTimeout(this.timer);
+                this.timer = undefined;
             }
-        } else {
-            // The object was deleted or the state value has expired
-            this.log.info(`state ${id} deleted`);
+            this.shutdown.abort();
+        } finally {
+            callback();
         }
     }
-    // If you need to accept messages in your adapter, uncomment the following block and the corresponding line in the constructor.
-    // /**
-    //  * Some message was sent to this instance over message box. Used by email, pushover, text2speech, ...
-    //  * Using this method requires "common.messagebox" property to be set to true in io-package.json
-    //  */
-    //
-    // private onMessage(obj: ioBroker.Message): void {
-    //     if (typeof obj === 'object' && obj.message) {
-    //         if (obj.command === 'send') {
-    //             // e.g. send email or pushover or whatever
-    //             this.log.info('send command');
-    //             // Send response in callback if required
-    //             if (obj.callback) this.sendTo(obj.from, obj.command, 'Message received', obj.callback);
-    //         }
-    //     }
-    // }
 }
+
 if (require.main !== module) {
     // Export the constructor in compact mode
     module.exports = (options: Partial<utils.AdapterOptions> | undefined) => new GoogleCalendar(options);
