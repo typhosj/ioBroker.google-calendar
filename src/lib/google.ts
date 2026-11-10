@@ -23,6 +23,20 @@ export interface GoogleEvent {
     end: EventTime;
 }
 
+/** Body of `events.insert`. */
+export interface EventBody {
+    /** Title of the event. */
+    summary: string;
+    /** Start of the event. */
+    start: EventTime;
+    /** End of the event; exclusive for all-day events. */
+    end: EventTime;
+    /** Recurrence rules, e.g. `RRULE:FREQ=YEARLY`. */
+    recurrence?: string[];
+    /** Always the calendar default reminders. */
+    reminders: { useDefault: true };
+}
+
 /** Base URL of the Google Calendar v3 REST API. */
 export const API_BASE = 'https://www.googleapis.com/calendar/v3';
 /** Items requested per page. */
