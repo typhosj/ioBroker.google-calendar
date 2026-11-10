@@ -66,6 +66,36 @@ describe('buildEvent', () => {
         });
     });
 
+    it('accepts a real birth year for a birthday only', () => {
+        expect(build({ type: 'birthday', text: 'Ben', startDate: '1985-03-12' })).to.deep.equal({
+            ok: true,
+            type: 'birthday',
+            body: {
+                summary: 'Ben',
+                start: { date: '1985-03-12' },
+                end: { date: '1985-03-13' },
+                recurrence: ['RRULE:FREQ=YEARLY'],
+                reminders: { useDefault: true },
+            },
+        });
+        expect(build({ type: 'birthday', text: 'Ben', startDate: '1899-12-31' })).to.deep.include({ ok: false });
+        expect(build({ startDate: '1985-03-12' })).to.deep.include({ ok: false });
+    });
+
+    it('accepts the date boundaries 2000-01-01 and 2100-12-31', () => {
+        expect(build({ startDate: '2000-01-01' }).ok).to.equal(true);
+        expect(build({ startDate: '2100-12-31' }).ok).to.equal(true);
+    });
+
+    it('rejects a non-string or blank end date of an appointment', () => {
+        for (const endDate of [42, '   ']) {
+            expect(build({ type: 'appointment', startTime: '10:00', endDate, endTime: '11:00' })).to.deep.equal({
+                ok: false,
+                error: 'Bitte ein gültiges Enddatum eingeben.',
+            });
+        }
+    });
+
     it('collapses whitespace and caps the text', () => {
         expect((build({ text: '  Müll \n  raus ' }) as { body: { summary: string } }).body.summary).to.equal(
             'Müll raus',

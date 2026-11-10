@@ -63,17 +63,18 @@ const nextDay = (d: Date): Date => new Date(d.getFullYear(), d.getMonth(), d.get
 const fail = (error: string): DraftResult => ({ ok: false, error });
 
 /**
- * A real local calendar date between 2000 and 2100, or null.
+ * A real local calendar date between `minYear` and 2100, or null.
  *
  * @param value Untrusted date text, expected as YYYY-MM-DD.
+ * @param minYear Earliest accepted year.
  */
-function parseDate(value: unknown): Date | null {
+function parseDate(value: unknown, minYear = 2000): Date | null {
     const match = typeof value === 'string' ? DATE.exec(value.trim()) : null;
     if (!match) {
         return null;
     }
     const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])];
-    if (year < 2000 || year > 2100) {
+    if (year < minYear || year > 2100) {
         return null;
     }
     const date = new Date(year, month - 1, day);
@@ -96,6 +97,7 @@ function atTime(day: Date, value: unknown): Date | null {
 
 /**
  * Validates the draft and builds the Google event; every rejection is a German sentence for the dialog.
+ * Known limit: a birthday on 29 February (RRULE:FREQ=YEARLY) shows in Google only in leap years.
  *
  * @param draft Untrusted values of the draft states.
  */
@@ -111,7 +113,7 @@ export function buildEvent(draft: Draft): DraftResult {
     if (text.length > MAX_TEXT) {
         return fail(`Der Text ist länger als ${MAX_TEXT} Zeichen.`);
     }
-    const startDay = parseDate(draft.startDate);
+    const startDay = parseDate(draft.startDate, type === 'birthday' ? 1900 : 2000);
     if (!startDay) {
         return fail('Bitte ein gültiges Datum eingeben.');
     }

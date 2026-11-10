@@ -61,7 +61,7 @@ Set `draft.open` to true: the form states are filled with defaults (next full ho
 -->
 
 ### **WORK IN PROGRESS**
-* (typhosj) initial version: read calendars with a service account
+* (typhosj) initial version: read calendars with a service account and create entries from the draft states
 
 ## License
 MIT License

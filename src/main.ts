@@ -123,7 +123,7 @@ class GoogleCalendar extends utils.Adapter {
             if (this.stopping) {
                 return;
             }
-            this.log.info(`Created a ${result.type} in calendar "${calendar.name}"`);
+            this.log.info(`Created an entry of type ${result.type} in calendar "${calendar.name}"`);
             await this.setStateAsync('draft.result', 'ok', true);
             await this.setStateAsync('draft.text', '', true);
             await this.setStateAsync('draft.open', false, true);
