@@ -39,20 +39,28 @@ Reads events from one or more [Google Calendar](https://calendar.google.com) cal
 | `info.connection` | true while at least one calendar could be read in the last cycle. |
 | `table` | JSON array with all entries of all calendars, sorted by start. |
 | `upcoming` | JSON array with the next entries, ready for a list widget. |
-| `draft.type` | Type of the new entry: `appointment`, `reminder` or `birthday`. |
-| `draft.text` | Title or name of the new entry. |
-| `draft.startDate` | Date, `YYYY-MM-DD`. |
-| `draft.startTime` | Time, `HH:MM`. |
-| `draft.endDate` | End date, `YYYY-MM-DD` (appointments). |
-| `draft.endTime` | End time, `HH:MM` (appointments). |
-| `draft.allDay` | All-day entry (appointments). |
-| `draft.open` | Set to true to fill the form with defaults; set to false again after a successful save. |
-| `draft.save` | Button: creates the entry from the form. |
-| `draft.result` | `ok`, or the reason the last save failed (German, for the dialog). |
+| `draft.request` | Write the vis-2 browser instance ID here to open that browser's form. |
+| `draft.view` | JSON object with `type`, `allDay` and `result` per browser, for vis bindings. |
+| `draft.<id>.type` | Type of the new entry: `appointment`, `reminder` or `birthday`. |
+| `draft.<id>.text` | Title or name of the new entry. |
+| `draft.<id>.startDate` | Date, `YYYY-MM-DD`. |
+| `draft.<id>.startTime` | Time, `HH:MM`. |
+| `draft.<id>.endDate` | End date, `YYYY-MM-DD` (appointments). |
+| `draft.<id>.endTime` | End time, `HH:MM` (appointments). |
+| `draft.<id>.allDay` | All-day entry (appointments). |
+| `draft.<id>.open` | true while the dialog of this browser is open; false again after a successful save. |
+| `draft.<id>.save` | Button: creates the entry from the form. |
+| `draft.<id>.result` | `ok`, or the reason the last save failed (German, for the dialog). |
 
 ### Creating entries
 
-Set `draft.open` to true: the form states are filled with defaults (next full hour, one hour long). Edit the `draft.*` fields, then press `draft.save`. The entry is created in the writable calendar configured for its type and the calendars are read again right away. `draft.result` holds `ok` or the reason for a failure; after success the text is cleared and `draft.open` is set to false. When a user changes the start and it passes the end, the end follows: an earlier end date takes the start date, a timed end that is not after the start becomes one hour after it.
+Every vis-2 browser has its own form, so two people can create entries at the same time. `<id>` is the browser instance ID that vis-2 generates (eight hex digits); in vis it is available as the binding `{instance}`, for example `google-calendar.0.draft.{instance}.text` as a widget object ID.
+
+A button writes `{instance}` to `draft.request`. On the first request the adapter creates the states of that browser; every request fills the form with defaults (next full hour, one hour long) and sets `draft.<id>.open` to true. Edit the fields, then press `draft.<id>.save`. The entry is created in the writable calendar configured for its type and the calendars are read again right away. `draft.<id>.result` holds `ok` or the reason for a failure; after success the text is cleared and `open` is set to false. When a user changes the start and it passes the end, the end follows: an earlier end date takes the start date, a timed end that is not after the start becomes one hour after it.
+
+vis bindings cannot contain `{instance}` inside an object ID. For those, read `draft.view` with `instance` as a variable, for example `{v:google-calendar.0.draft.view;i:instance;((v||[])[i]||[]).type}`.
+
+The states of a browser stay until they are deleted by hand, for example after its browser data was cleared.
 
 ## Changelog
 <!--
@@ -63,6 +71,7 @@ Set `draft.open` to true: the form states are filled with defaults (next full ho
 ### **WORK IN PROGRESS**
 * (typhosj) initial version: read calendars with a service account and create entries from the draft states
 * (typhosj) the end of a new entry follows its start when the start passes it
+* (typhosj) every vis browser has its own form for new entries
 
 ## License
 MIT License

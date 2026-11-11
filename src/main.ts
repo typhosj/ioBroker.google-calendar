@@ -1,8 +1,18 @@
 import * as utils from '@iobroker/adapter-core';
 
 import { createTokenSource, type TokenSource } from './lib/auth';
-import { normalizeConfig, type Settings } from './lib/config';
-import { buildEvent, draftDefaults, followStart, saveErrorText, type Draft } from './lib/draft';
+import { ENTRY_TYPES, normalizeConfig, type EntryType, type Settings } from './lib/config';
+import {
+    buildEvent,
+    DRAFT_STATES,
+    draftDefaults,
+    followStart,
+    isDeviceId,
+    parseViews,
+    saveErrorText,
+    type DeviceView,
+    type Draft,
+} from './lib/draft';
 import { describeError, insertEvent, listEvents } from './lib/google';
 import { createHttp, type Http } from './lib/http';
 import { MAX_BACKOFF_MS, nextDelay, startLoop } from './lib/loop';
@@ -15,7 +25,9 @@ const REQUEST_TIMEOUT_MS = 30_000;
 const SIGN_IN = '';
 const DRAFT_FIELDS = ['type', 'text', 'startDate', 'startTime', 'endDate', 'endTime', 'allDay'] as const;
 /** A user change of these moves the end of the draft when the start has passed it. */
-const FOLLOWED_FIELDS = ['startDate', 'startTime', 'allDay'] as const;
+const FOLLOWED_FIELDS: readonly string[] = ['startDate', 'startTime', 'allDay'];
+/** `draft.<device>.<field>` relative to the namespace. */
+const DEVICE_STATE = /^draft\.([0-9a-f]{8})\.([A-Za-z]+)$/;
 
 interface Google {
     settings: Settings;
@@ -28,7 +40,10 @@ class GoogleCalendar extends utils.Adapter {
     private readonly shutdown = new AbortController();
     private loop: { stop: () => void; trigger: () => void } | undefined;
     private stopping = false;
-    private saving = false;
+    /** Devices with a save in progress. */
+    private readonly saving = new Set<string>();
+    /** Devices that opened the dialog, with what their vis bindings need. */
+    private views: Record<string, DeviceView> = {};
     private failures = 0;
     /** Last good rows per calendar ID; a calendar that fails keeps its previous rows. */
     private readonly rowsByCalendar = new Map<string, Row[]>();
@@ -64,15 +79,13 @@ class GoogleCalendar extends utils.Adapter {
                 this.log.error(`Handling ${id} failed: ${describeError(error)}`);
             });
         });
-        await this.subscribeStatesAsync('draft.open');
-        await this.subscribeStatesAsync('draft.save');
-        for (const field of FOLLOWED_FIELDS) {
-            await this.subscribeStatesAsync(`draft.${field}`);
-        }
+        this.views = parseViews((await this.getStateAsync('draft.view'))?.val);
+        await this.subscribeStatesAsync('draft.*');
     }
 
     /**
-     * Reacts to a user command on the draft states.
+     * Reacts to a user command on the draft states: an open request on `draft.request`, or a change in
+     * the draft of one device.
      *
      * @param id Full state ID
      * @param state New state
@@ -81,66 +94,129 @@ class GoogleCalendar extends utils.Adapter {
         if (!state || state.ack || this.stopping) {
             return;
         }
-        if (FOLLOWED_FIELDS.some(field => id.endsWith(`.draft.${field}`))) {
-            await this.moveEnd();
-            return;
-        }
-        if (state.val !== true) {
-            return;
-        }
-        if (id.endsWith('.draft.open')) {
-            const defaults = draftDefaults(new Date());
-            for (const [key, value] of Object.entries(defaults)) {
-                await this.setStateAsync(`draft.${key}`, value, true);
+        const relative = id.slice(this.namespace.length + 1);
+        if (relative === 'draft.request') {
+            if (isDeviceId(state.val)) {
+                await this.openDraft(state.val);
             }
-            await this.setStateAsync('draft.result', '', true);
-            await this.setStateAsync('draft.open', true, true);
-        } else if (id.endsWith('.draft.save')) {
-            await this.save();
+            return;
+        }
+        const match = DEVICE_STATE.exec(relative);
+        if (!match || !this.views[match[1]]) {
+            return;
+        }
+        const [, device, field] = match;
+        if (field === 'type' || field === 'allDay') {
+            await this.publishView(
+                device,
+                field === 'type' ? { type: String(state.val) } : { allDay: state.val === true },
+            );
+        }
+        if (FOLLOWED_FIELDS.includes(field)) {
+            await this.moveEnd(device);
+        } else if (field === 'save' && state.val === true) {
+            await this.save(device);
         }
     }
 
-    private async readDraft(): Promise<Draft> {
+    /**
+     * Creates the draft states of a device on its first request, fills in defaults and opens its dialog.
+     *
+     * @param device vis-2 browser instance ID
+     */
+    private async openDraft(device: string): Promise<void> {
+        await this.setObjectNotExistsAsync(`draft.${device}`, {
+            type: 'channel',
+            common: { name: `New entry of vis browser ${device}` },
+            native: {},
+        });
+        for (const [field, common] of Object.entries(DRAFT_STATES)) {
+            await this.setObjectNotExistsAsync(`draft.${device}.${field}`, { type: 'state', common, native: {} });
+        }
+        const current = (await this.getStateAsync(`draft.${device}.type`))?.val;
+        const type: EntryType = ENTRY_TYPES.includes(current as EntryType) ? (current as EntryType) : 'reminder';
+        await this.setField(device, 'type', type);
+        for (const [key, value] of Object.entries(draftDefaults(new Date()))) {
+            await this.setField(device, key, value);
+        }
+        await this.setField(device, 'result', '');
+        await this.setField(device, 'open', true);
+    }
+
+    /**
+     * Writes one draft state, acknowledged, and keeps `draft.view` in step.
+     *
+     * @param device Device ID
+     * @param field Field name
+     * @param value New value
+     */
+    private async setField(device: string, field: string, value: ioBroker.StateValue): Promise<void> {
+        if (this.stopping) {
+            return;
+        }
+        await this.setStateAsync(`draft.${device}.${field}`, value, true);
+        if (field === 'type' || field === 'allDay' || field === 'result') {
+            await this.publishView(device, { [field]: value });
+        }
+    }
+
+    /**
+     * Updates the view of one device and writes all views to `draft.view`.
+     *
+     * @param device Device ID
+     * @param patch Changed fields
+     */
+    private async publishView(device: string, patch: Partial<DeviceView>): Promise<void> {
+        this.views[device] = { ...{ type: '', allDay: false, result: '' }, ...this.views[device], ...patch };
+        if (!this.stopping) {
+            await this.setStateChangedAsync('draft.view', JSON.stringify(this.views), true);
+        }
+    }
+
+    private async readDraft(device: string): Promise<Draft> {
         return Object.fromEntries(
-            await Promise.all(DRAFT_FIELDS.map(async key => [key, (await this.getStateAsync(`draft.${key}`))?.val])),
+            await Promise.all(
+                DRAFT_FIELDS.map(async key => [key, (await this.getStateAsync(`draft.${device}.${key}`))?.val]),
+            ),
         );
     }
 
-    /** Keeps the end of the draft after its start when the user changes the start. */
-    private async moveEnd(): Promise<void> {
-        const patch = followStart(await this.readDraft());
+    /**
+     * Keeps the end of the draft after its start when the user changes the start.
+     *
+     * @param device Device ID
+     */
+    private async moveEnd(device: string): Promise<void> {
+        const patch = followStart(await this.readDraft(device));
         for (const [key, value] of Object.entries(patch)) {
-            if (this.stopping) {
-                return;
-            }
-            await this.setStateAsync(`draft.${key}`, value, true);
+            await this.setField(device, key, value);
         }
     }
 
-    /** Validates the draft, creates the event and reports the outcome in `draft.result`. */
-    private async save(): Promise<void> {
+    /**
+     * Validates the draft of a device, creates the event and reports the outcome in its `result`.
+     *
+     * @param device Device ID
+     */
+    private async save(device: string): Promise<void> {
         const google = this.google;
         if (!google) {
             return;
         }
-        if (this.saving) {
-            await this.setStateAsync('draft.result', 'Speichern läuft noch …', true);
+        if (this.saving.has(device)) {
+            await this.setField(device, 'result', 'Speichern läuft noch …');
             return;
         }
-        this.saving = true;
+        this.saving.add(device);
         try {
-            const result = buildEvent(await this.readDraft());
+            const result = buildEvent(await this.readDraft(device));
             if (!result.ok) {
-                await this.setStateAsync('draft.result', result.error, true);
+                await this.setField(device, 'result', result.error);
                 return;
             }
             const calendar = google.settings.writable[result.type];
             if (!calendar) {
-                await this.setStateAsync(
-                    'draft.result',
-                    'Für diesen Typ ist kein beschreibbarer Kalender eingerichtet.',
-                    true,
-                );
+                await this.setField(device, 'result', 'Für diesen Typ ist kein beschreibbarer Kalender eingerichtet.');
                 return;
             }
             await insertEvent(google.http, await google.token(), calendar.calendarId, result.body);
@@ -148,17 +224,17 @@ class GoogleCalendar extends utils.Adapter {
                 return;
             }
             this.log.info(`Created an entry of type ${result.type} in calendar "${calendar.name}"`);
-            await this.setStateAsync('draft.result', 'ok', true);
-            await this.setStateAsync('draft.text', '', true);
-            await this.setStateAsync('draft.open', false, true);
+            await this.setField(device, 'result', 'ok');
+            await this.setField(device, 'text', '');
+            await this.setField(device, 'open', false);
             this.loop?.trigger();
         } catch (error) {
             if (!this.stopping) {
                 this.log.warn(`Creating an entry failed: ${describeError(error)}`);
-                await this.setStateAsync('draft.result', saveErrorText(error), true);
+                await this.setField(device, 'result', saveErrorText(error));
             }
         } finally {
-            this.saving = false;
+            this.saving.delete(device);
         }
     }
 

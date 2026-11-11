@@ -1,5 +1,14 @@
 import { expect } from 'chai';
-import { buildEvent, draftDefaults, followStart, MAX_TEXT, saveErrorText, type Draft } from './draft';
+import {
+    buildEvent,
+    draftDefaults,
+    followStart,
+    isDeviceId,
+    MAX_TEXT,
+    parseViews,
+    saveErrorText,
+    type Draft,
+} from './draft';
 import { GoogleError } from './http';
 
 const base: Draft = {
@@ -246,5 +255,55 @@ describe('saveErrorText', () => {
         expect(saveErrorText(new GoogleError('x', 404))).to.contain('Freigabe');
         expect(saveErrorText(new GoogleError('x', 400))).to.contain('abgelehnt');
         expect(saveErrorText(new Error('timeout'))).to.contain('später');
+    });
+});
+
+describe('isDeviceId', () => {
+    it('accepts the eight lower-case hex digits vis-2 generates', () => {
+        expect(isDeviceId('0a1b2c3d')).to.equal(true);
+        expect(isDeviceId('ffffffff')).to.equal(true);
+    });
+
+    it('rejects anything else, so no other ID can be built from it', () => {
+        for (const value of [
+            '',
+            '0a1b2c3',
+            '0a1b2c3d4',
+            '0A1B2C3D',
+            '0a1b2c3g',
+            '0a1b.c3d',
+            '../a1b2c',
+            ' 0a1b2c3d',
+            '0a1b2c3d\n',
+            12345678,
+            null,
+            undefined,
+            true,
+        ]) {
+            expect(isDeviceId(value), JSON.stringify(value)).to.equal(false);
+        }
+    });
+});
+
+describe('parseViews', () => {
+    it('reads the views of known devices', () => {
+        const views = { '0a1b2c3d': { type: 'appointment', allDay: true, result: '' } };
+        expect(parseViews(JSON.stringify(views))).to.deep.equal(views);
+    });
+
+    it('starts empty from an empty, broken or wrong value', () => {
+        for (const value of [undefined, null, '', '{', '[]', '"x"', '42', 'null', 42]) {
+            expect(parseViews(value), String(value)).to.deep.equal({});
+        }
+    });
+
+    it('drops entries with an invalid device ID or a non-object view', () => {
+        const json = JSON.stringify({ '0a1b2c3d': 'x', 'not-an-id': { type: 'reminder' }, 11112222: null });
+        expect(parseViews(json)).to.deep.equal({});
+    });
+
+    it('keeps only known fields with the right types', () => {
+        const json = JSON.stringify({ '0a1b2c3d': { type: 'reminder', allDay: 'yes', result: 7, extra: 1 } });
+        expect(parseViews(json)).to.deep.equal({ '0a1b2c3d': { type: 'reminder', allDay: false, result: '' } });
     });
 });

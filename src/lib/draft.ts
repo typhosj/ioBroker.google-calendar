@@ -3,7 +3,7 @@ import type { EventBody } from './google';
 import { GoogleError } from './http';
 import { pad2, timeText } from './rows';
 
-/** The values of the `draft.*` states, unvalidated. */
+/** The values of one device's `draft.<device>.*` states, unvalidated. */
 export interface Draft {
     /** Entry type, one of ENTRY_TYPES. */
     type: unknown;
@@ -219,6 +219,95 @@ export function draftDefaults(now: Date): {
         allDay: false,
     };
 }
+
+/** What the vis bindings of one device's dialog need, published together in `draft.view`. */
+export interface DeviceView {
+    /** Entry type as last set. */
+    type: string;
+    /** Whether the draft is all-day. */
+    allDay: boolean;
+    /** Result of the last save of this device. */
+    result: string;
+}
+
+const DEVICE_ID = /^[0-9a-f]{8}$/;
+
+/**
+ * Whether the value is a vis-2 browser instance ID (eight lower-case hex digits, as vis-2 generates
+ * them). Only such an ID becomes part of a state ID.
+ * Known limit: an instance ID typed in by hand in vis-2 that does not match is not supported.
+ *
+ * @param value Untrusted value written by vis.
+ */
+export function isDeviceId(value: unknown): value is string {
+    return typeof value === 'string' && DEVICE_ID.test(value);
+}
+
+/**
+ * Reads the persisted `draft.view` JSON; anything malformed is dropped.
+ *
+ * @param value Value of the `draft.view` state.
+ */
+export function parseViews(value: unknown): Record<string, DeviceView> {
+    let parsed: unknown;
+    try {
+        parsed = typeof value === 'string' ? JSON.parse(value) : null;
+    } catch {
+        return {};
+    }
+    const views: Record<string, DeviceView> = {};
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return views;
+    }
+    for (const [device, view] of Object.entries(parsed as Record<string, unknown>)) {
+        if (!isDeviceId(device) || !view || typeof view !== 'object') {
+            continue;
+        }
+        const { type, allDay, result } = view as Record<string, unknown>;
+        views[device] = {
+            type: typeof type === 'string' ? type : '',
+            allDay: allDay === true,
+            result: typeof result === 'string' ? result : '',
+        };
+    }
+    return views;
+}
+
+/** The states of one device's draft, created below `draft.<device>` when the device first opens the dialog. */
+export const DRAFT_STATES: Record<string, ioBroker.StateCommon> = {
+    type: {
+        role: 'text',
+        name: 'Type',
+        type: 'string',
+        read: true,
+        write: true,
+        def: 'reminder',
+        states: { appointment: 'Termin', reminder: 'Erinnerung', birthday: 'Geburtstag' },
+    },
+    text: { role: 'text', name: 'Text or name', type: 'string', read: true, write: true, def: '' },
+    startDate: { role: 'date', name: 'Date (YYYY-MM-DD)', type: 'string', read: true, write: true, def: '' },
+    startTime: { role: 'text', name: 'Time (HH:MM)', type: 'string', read: true, write: true, def: '' },
+    endDate: {
+        role: 'date',
+        name: 'End date (YYYY-MM-DD, appointments)',
+        type: 'string',
+        read: true,
+        write: true,
+        def: '',
+    },
+    endTime: {
+        role: 'text',
+        name: 'End time (HH:MM, appointments)',
+        type: 'string',
+        read: true,
+        write: true,
+        def: '',
+    },
+    allDay: { role: 'switch', name: 'All day (appointments)', type: 'boolean', read: true, write: true, def: false },
+    open: { role: 'switch', name: 'Dialog open', type: 'boolean', read: true, write: true, def: false },
+    save: { role: 'button', name: 'Save the entry', type: 'boolean', read: false, write: true },
+    result: { role: 'text', name: 'Result of the last save', type: 'string', read: true, write: false, def: '' },
+};
 
 /**
  * German text for a failed insert.
