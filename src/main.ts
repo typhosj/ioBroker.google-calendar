@@ -2,7 +2,7 @@ import * as utils from '@iobroker/adapter-core';
 
 import { createTokenSource, type TokenSource } from './lib/auth';
 import { normalizeConfig, type Settings } from './lib/config';
-import { buildEvent, draftDefaults, saveErrorText, type Draft } from './lib/draft';
+import { buildEvent, draftDefaults, followStart, saveErrorText, type Draft } from './lib/draft';
 import { describeError, insertEvent, listEvents } from './lib/google';
 import { createHttp, type Http } from './lib/http';
 import { MAX_BACKOFF_MS, nextDelay, startLoop } from './lib/loop';
@@ -14,6 +14,8 @@ const REQUEST_TIMEOUT_MS = 30_000;
 /** Key of the sign-in problem in `reported`; calendar problems use their calendar ID. */
 const SIGN_IN = '';
 const DRAFT_FIELDS = ['type', 'text', 'startDate', 'startTime', 'endDate', 'endTime', 'allDay'] as const;
+/** A user change of these moves the end of the draft when the start has passed it. */
+const FOLLOWED_FIELDS = ['startDate', 'startTime', 'allDay'] as const;
 
 interface Google {
     settings: Settings;
@@ -64,6 +66,9 @@ class GoogleCalendar extends utils.Adapter {
         });
         await this.subscribeStatesAsync('draft.open');
         await this.subscribeStatesAsync('draft.save');
+        for (const field of FOLLOWED_FIELDS) {
+            await this.subscribeStatesAsync(`draft.${field}`);
+        }
     }
 
     /**
@@ -73,7 +78,14 @@ class GoogleCalendar extends utils.Adapter {
      * @param state New state
      */
     private async onStateChange(id: string, state: ioBroker.State | null | undefined): Promise<void> {
-        if (!state || state.ack || state.val !== true || this.stopping) {
+        if (!state || state.ack || this.stopping) {
+            return;
+        }
+        if (FOLLOWED_FIELDS.some(field => id.endsWith(`.draft.${field}`))) {
+            await this.moveEnd();
+            return;
+        }
+        if (state.val !== true) {
             return;
         }
         if (id.endsWith('.draft.open')) {
@@ -85,6 +97,23 @@ class GoogleCalendar extends utils.Adapter {
             await this.setStateAsync('draft.open', true, true);
         } else if (id.endsWith('.draft.save')) {
             await this.save();
+        }
+    }
+
+    private async readDraft(): Promise<Draft> {
+        return Object.fromEntries(
+            await Promise.all(DRAFT_FIELDS.map(async key => [key, (await this.getStateAsync(`draft.${key}`))?.val])),
+        );
+    }
+
+    /** Keeps the end of the draft after its start when the user changes the start. */
+    private async moveEnd(): Promise<void> {
+        const patch = followStart(await this.readDraft());
+        for (const [key, value] of Object.entries(patch)) {
+            if (this.stopping) {
+                return;
+            }
+            await this.setStateAsync(`draft.${key}`, value, true);
         }
     }
 
@@ -100,12 +129,7 @@ class GoogleCalendar extends utils.Adapter {
         }
         this.saving = true;
         try {
-            const draft = Object.fromEntries(
-                await Promise.all(
-                    DRAFT_FIELDS.map(async key => [key, (await this.getStateAsync(`draft.${key}`))?.val]),
-                ),
-            ) as unknown as Draft;
-            const result = buildEvent(draft);
+            const result = buildEvent(await this.readDraft());
             if (!result.ok) {
                 await this.setStateAsync('draft.result', result.error, true);
                 return;

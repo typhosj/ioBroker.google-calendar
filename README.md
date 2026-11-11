@@ -52,7 +52,7 @@ Reads events from one or more [Google Calendar](https://calendar.google.com) cal
 
 ### Creating entries
 
-Set `draft.open` to true: the form states are filled with defaults (next full hour, one hour long). Edit the `draft.*` fields, then press `draft.save`. The entry is created in the writable calendar configured for its type and the calendars are read again right away. `draft.result` holds `ok` or the reason for a failure; after success the text is cleared and `draft.open` is set to false.
+Set `draft.open` to true: the form states are filled with defaults (next full hour, one hour long). Edit the `draft.*` fields, then press `draft.save`. The entry is created in the writable calendar configured for its type and the calendars are read again right away. `draft.result` holds `ok` or the reason for a failure; after success the text is cleared and `draft.open` is set to false. When a user changes the start and it passes the end, the end follows: an earlier end date takes the start date, a timed end that is not after the start becomes one hour after it.
 
 ## Changelog
 <!--
@@ -62,6 +62,7 @@ Set `draft.open` to true: the form states are filled with defaults (next full ho
 
 ### **WORK IN PROGRESS**
 * (typhosj) initial version: read calendars with a service account and create entries from the draft states
+* (typhosj) the end of a new entry follows its start when the start passes it
 
 ## License
 MIT License

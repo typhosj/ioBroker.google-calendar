@@ -290,6 +290,98 @@ describe('draft', () => {
         expect(posts).to.have.length(1);
     });
 
+    describe('end follows start', () => {
+        const before = {
+            type: 'appointment',
+            startDate: '2026-11-14',
+            startTime: '10:00',
+            endDate: '2026-11-11',
+            endTime: '09:00',
+            allDay: false,
+        };
+
+        it('moves the end when the start date passes it', async () => {
+            const { adapter, internals } = startCycle();
+            fill(adapter, before);
+            await internals.onStateChange(`${ID}startDate`, { val: '2026-11-14', ack: false });
+            expect(adapter.states.get('draft.endDate')).to.equal('2026-11-14');
+            expect(adapter.states.get('draft.endTime')).to.equal('11:00');
+        });
+
+        it('moves the end when the start time passes it', async () => {
+            const { adapter, internals } = startCycle();
+            fill(adapter, { ...before, endDate: '2026-11-14' });
+            await internals.onStateChange(`${ID}startTime`, { val: '10:00', ack: false });
+            expect(adapter.states.get('draft.endTime')).to.equal('11:00');
+        });
+
+        it('applies the time rule when all-day is switched off', async () => {
+            const { adapter, internals } = startCycle();
+            fill(adapter, { ...before, endDate: '2026-11-14' });
+            await internals.onStateChange(`${ID}allDay`, { val: false, ack: false });
+            expect(adapter.states.get('draft.endTime')).to.equal('11:00');
+        });
+
+        it('writes nothing when the end is still after the start', async () => {
+            const { adapter, internals } = startCycle();
+            fill(adapter, { ...before, endDate: '2026-11-15' });
+            await internals.onStateChange(`${ID}startDate`, { val: '2026-11-14', ack: false });
+            expect(adapter.writes).to.deep.equal([]);
+        });
+
+        it('ignores an acknowledged start, so its own defaults do not trigger it', async () => {
+            const { adapter, internals } = startCycle();
+            fill(adapter, before);
+            await internals.onStateChange(`${ID}startDate`, { val: '2026-11-14', ack: true });
+            expect(adapter.writes).to.deep.equal([]);
+        });
+
+        it('acknowledges what it writes', async () => {
+            const { adapter, internals } = startCycle();
+            const acks: unknown[] = [];
+            const write = adapter.setStateAsync.bind(adapter);
+            adapter.setStateAsync = (id: string, value: unknown, ack?: unknown): Promise<void> => {
+                acks.push(ack);
+                return write(id, value);
+            };
+            fill(adapter, before);
+            await internals.onStateChange(`${ID}startDate`, { val: '2026-11-14', ack: false });
+            expect(acks).to.deep.equal([true, true]);
+        });
+
+        it('writes nothing after unload starts', async () => {
+            const { adapter, internals } = startCycle();
+            fill(adapter, before);
+            unload(adapter);
+            await internals.onStateChange(`${ID}startDate`, { val: '2026-11-14', ack: false });
+            expect(adapter.writes).to.deep.equal([]);
+        });
+
+        it('subscribes to the fields the end follows', async () => {
+            const adapter = createAdapter({});
+            (adapter as unknown as { config: object }).config = {
+                serviceAccountKey: JSON.stringify({
+                    client_email: 'robot@example.test',
+                    private_key: '-----BEGIN PRIVATE KEY-----\nx\n-----END PRIVATE KEY-----\n',
+                }),
+                calendars: [
+                    {
+                        name: 'Test',
+                        calendarId: 'c@example.test',
+                        type: 'appointment',
+                        color: '#ff0000',
+                        writable: true,
+                    },
+                ],
+                pollMinutes: 5,
+                daysPast: 1,
+                daysPreview: 7,
+            };
+            await adapter.listeners.get('ready')?.(undefined);
+            expect(adapter.subscribed).to.include.members(['draft.startDate', 'draft.startTime', 'draft.allDay']);
+        });
+    });
+
     it('writes nothing after unload starts during the insert', async () => {
         const { adapter, internals, releaseInsert } = startCycle({ holdInsert: true });
         fill(adapter, { type: 'reminder', text: 'Test', startDate: '2026-11-12', startTime: '08:00' });

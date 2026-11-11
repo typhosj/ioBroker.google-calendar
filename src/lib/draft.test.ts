@@ -1,5 +1,5 @@
 import { expect } from 'chai';
-import { buildEvent, draftDefaults, MAX_TEXT, saveErrorText, type Draft } from './draft';
+import { buildEvent, draftDefaults, followStart, MAX_TEXT, saveErrorText, type Draft } from './draft';
 import { GoogleError } from './http';
 
 const base: Draft = {
@@ -169,6 +169,74 @@ describe('draftDefaults', () => {
             '2027-01-01',
             '01:00',
         ]);
+    });
+});
+
+describe('followStart', () => {
+    const timed: Draft = {
+        ...base,
+        type: 'appointment',
+        startDate: '2026-11-14',
+        startTime: '10:00',
+        endDate: '2026-11-14',
+        endTime: '11:00',
+    };
+    const follow = (patch: Partial<Draft>): ReturnType<typeof followStart> => followStart({ ...timed, ...patch });
+
+    it('leaves an end after the start alone', () => {
+        expect(follow({})).to.deep.equal({});
+        expect(follow({ endDate: '2026-11-15', endTime: '09:00' })).to.deep.equal({});
+    });
+
+    it('moves an earlier end date to the start date and keeps a later end time', () => {
+        expect(follow({ endDate: '2026-11-11', endTime: '15:00' })).to.deep.equal({ endDate: '2026-11-14' });
+    });
+
+    it('moves an end time that is not after the start to one hour after it', () => {
+        expect(follow({ endTime: '10:00' })).to.deep.equal({ endDate: '2026-11-14', endTime: '11:00' });
+        expect(follow({ endTime: '09:59' })).to.deep.equal({ endDate: '2026-11-14', endTime: '11:00' });
+        expect(follow({ endTime: '10:01' })).to.deep.equal({});
+    });
+
+    it('moves date and time together when both are before the start', () => {
+        expect(follow({ endDate: '2026-11-11', endTime: '09:00' })).to.deep.equal({
+            endDate: '2026-11-14',
+            endTime: '11:00',
+        });
+    });
+
+    it('crosses midnight when the start is late', () => {
+        expect(follow({ startTime: '23:30', endTime: '23:00' })).to.deep.equal({
+            endDate: '2026-11-15',
+            endTime: '00:30',
+        });
+    });
+
+    it('moves only the date of an all-day entry', () => {
+        expect(follow({ allDay: true, endDate: '2026-11-11', endTime: '09:00' })).to.deep.equal({
+            endDate: '2026-11-14',
+        });
+        expect(follow({ allDay: true, endTime: '09:00' })).to.deep.equal({});
+    });
+
+    it('treats an empty end date as the start date', () => {
+        expect(follow({ endDate: '', endTime: '09:00' })).to.deep.equal({ endDate: '2026-11-14', endTime: '11:00' });
+    });
+
+    it('changes nothing while the start date or the end date is invalid', () => {
+        expect(follow({ startDate: '2026-02-30', endDate: '2026-01-01' })).to.deep.equal({});
+        expect(follow({ startDate: null, endDate: '2026-01-01' })).to.deep.equal({});
+        expect(follow({ endDate: 'bald' })).to.deep.equal({});
+    });
+
+    it('moves only the date while a time is invalid', () => {
+        expect(follow({ startTime: '25:00', endDate: '2026-11-11' })).to.deep.equal({ endDate: '2026-11-14' });
+        expect(follow({ endTime: '', endDate: '2026-11-11' })).to.deep.equal({ endDate: '2026-11-14' });
+        expect(follow({ endTime: 7 })).to.deep.equal({});
+    });
+
+    it('accepts a birth year as the start', () => {
+        expect(follow({ startDate: '1950-11-11' })).to.deep.equal({});
     });
 });
 

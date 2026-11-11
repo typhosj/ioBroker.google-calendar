@@ -169,6 +169,33 @@ export function buildEvent(draft: Draft): DraftResult {
 }
 
 /**
+ * What to change so the end is not before the start: an earlier end date takes the start date;
+ * a timed end that is not after the start becomes one hour after it.
+ * An invalid field changes nothing it depends on, validation reports it on save.
+ *
+ * @param draft Untrusted values of the draft states.
+ */
+export function followStart(draft: Draft): { endDate?: string; endTime?: string } {
+    const startDay = parseDate(draft.startDate, 1900);
+    const endDay = draft.endDate === '' ? startDay : parseDate(draft.endDate, 1900);
+    if (!startDay || !endDay) {
+        return {};
+    }
+    const moved = endDay < startDay;
+    const patch = moved ? { endDate: isoDate(startDay) } : {};
+    if (draft.allDay === true) {
+        return patch;
+    }
+    const from = atTime(startDay, draft.startTime);
+    const to = atTime(moved ? startDay : endDay, draft.endTime);
+    if (!from || !to || to > from) {
+        return patch;
+    }
+    const end = new Date(from.getFullYear(), from.getMonth(), from.getDate(), from.getHours() + 1, from.getMinutes());
+    return { endDate: isoDate(end), endTime: timeText(end) };
+}
+
+/**
  * Form values when the dialog opens: the next full hour, one hour long.
  *
  * @param now Current time in the host time zone.
