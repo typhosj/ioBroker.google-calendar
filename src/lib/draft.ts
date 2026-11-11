@@ -230,17 +230,18 @@ export interface DeviceView {
     result: string;
 }
 
-const DEVICE_ID = /^[0-9a-f]{8}$/;
+const DEVICE_ID = /^[0-9a-f]+(?:\.[0-9a-f]+)?$/;
 
 /**
- * Whether the value is a vis-2 browser instance ID (eight lower-case hex digits, as vis-2 generates
- * them). Only such an ID becomes part of a state ID.
+ * Whether the value is a vis-2 browser instance ID as vis-2 generates it: the last eight characters
+ * of a random number in hex, so lower-case hex digits with usually one dot inside (`a.f1fa48`).
+ * Only such an ID becomes part of a state ID; the dot adds one level (`draft.a.f1fa48`).
  * Known limit: an instance ID typed in by hand in vis-2 that does not match is not supported.
  *
  * @param value Untrusted value written by vis.
  */
 export function isDeviceId(value: unknown): value is string {
-    return typeof value === 'string' && DEVICE_ID.test(value);
+    return typeof value === 'string' && value.length === 8 && DEVICE_ID.test(value);
 }
 
 /**

@@ -294,6 +294,19 @@ describe('draft per device', () => {
             expect(setup.adapter.states.get(`draft.${A}.type`)).to.equal('reminder');
         });
 
+        it('handles a vis-2 instance ID with a dot, creating the level above it', async () => {
+            const DOT = 'a.f1fa48';
+            const { adapter, internals, posts } = await opened([DOT]);
+            expect(adapter.objects.get('draft.a')?.type).to.equal('folder');
+            expect(adapter.objects.get(`draft.${DOT}`)?.type).to.equal('channel');
+            expect(adapter.states.get(`draft.${DOT}.open`)).to.equal(true);
+            expect(views(adapter)[DOT].type).to.equal('reminder');
+            fill(adapter, DOT, reminder);
+            await internals.onStateChange(id(DOT, 'save'), user(true));
+            expect(posts).to.have.length(1);
+            expect(adapter.states.get(`draft.${DOT}.result`)).to.equal('ok');
+        });
+
         it('opens only the dialog of the requesting device', async () => {
             const { adapter } = await opened([A]);
             expect(adapter.states.has(`draft.${B}.open`)).to.equal(false);

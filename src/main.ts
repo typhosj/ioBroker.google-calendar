@@ -27,7 +27,7 @@ const DRAFT_FIELDS = ['type', 'text', 'startDate', 'startTime', 'endDate', 'endT
 /** A user change of these moves the end of the draft when the start has passed it. */
 const FOLLOWED_FIELDS: readonly string[] = ['startDate', 'startTime', 'allDay'];
 /** `draft.<device>.<field>` relative to the namespace. */
-const DEVICE_STATE = /^draft\.([0-9a-f]{8})\.([A-Za-z]+)$/;
+const DEVICE_STATE = /^draft\.([0-9a-f]+(?:\.[0-9a-f]+)?)\.([A-Za-z]+)$/;
 
 interface Google {
     settings: Settings;
@@ -125,6 +125,15 @@ class GoogleCalendar extends utils.Adapter {
      * @param device vis-2 browser instance ID
      */
     private async openDraft(device: string): Promise<void> {
+        const dot = device.indexOf('.');
+        if (dot > 0) {
+            // The dot of the instance ID adds a level, and nested IDs need their parents.
+            await this.setObjectNotExistsAsync(`draft.${device.slice(0, dot)}`, {
+                type: 'folder',
+                common: { name: 'vis browsers' },
+                native: {},
+            });
+        }
         await this.setObjectNotExistsAsync(`draft.${device}`, {
             type: 'channel',
             common: { name: `New entry of vis browser ${device}` },

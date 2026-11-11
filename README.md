@@ -54,7 +54,7 @@ Reads events from one or more [Google Calendar](https://calendar.google.com) cal
 
 ### Creating entries
 
-Every vis-2 browser has its own form, so two people can create entries at the same time. `<id>` is the browser instance ID that vis-2 generates (eight hex digits); in vis it is available as the binding `{instance}`, for example `google-calendar.0.draft.{instance}.text` as a widget object ID.
+Every vis-2 browser has its own form, so two people can create entries at the same time. `<id>` is the browser instance ID that vis-2 generates: eight characters, hex digits with usually one dot inside, such as `a.f1fa48` (the dot adds one level to the state IDs). In vis it is available as the binding `{instance}`, for example `google-calendar.0.draft.{instance}.text` as a widget object ID.
 
 A button writes `{instance}` to `draft.request`. On the first request the adapter creates the states of that browser; every request fills the form with defaults (next full hour, one hour long) and sets `draft.<id>.open` to true. Edit the fields, then press `draft.<id>.save`. The entry is created in the writable calendar configured for its type and the calendars are read again right away. `draft.<id>.result` holds `ok` or the reason for a failure; after success the text is cleared and `open` is set to false. When a user changes the start and it passes the end, the end follows: an earlier end date takes the start date, a timed end that is not after the start becomes one hour after it.
 

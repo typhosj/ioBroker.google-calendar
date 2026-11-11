@@ -259,9 +259,11 @@ describe('saveErrorText', () => {
 });
 
 describe('isDeviceId', () => {
-    it('accepts the eight lower-case hex digits vis-2 generates', () => {
-        expect(isDeviceId('0a1b2c3d')).to.equal(true);
-        expect(isDeviceId('ffffffff')).to.equal(true);
+    it('accepts what vis-2 generates: eight characters, hex digits with at most one dot inside', () => {
+        // vis-2 takes the last eight characters of a random float in hex, so a dot is the normal case.
+        for (const value of ['a.f1fa48', '83.f3f03', 'ee.4d3a7', '234567.8', '0a1b2c3d', 'ffffffff']) {
+            expect(isDeviceId(value), value).to.equal(true);
+        }
     });
 
     it('rejects anything else, so no other ID can be built from it', () => {
@@ -269,9 +271,15 @@ describe('isDeviceId', () => {
             '',
             '0a1b2c3',
             '0a1b2c3d4',
+            'a.f1fa4',
+            'a.f1fa489',
             '0A1B2C3D',
+            'A.F1FA48',
             '0a1b2c3g',
-            '0a1b.c3d',
+            '.1234567',
+            '1234567.',
+            'a..f1fa4',
+            'a.b.c.de',
             '../a1b2c',
             ' 0a1b2c3d',
             '0a1b2c3d\n',
@@ -287,7 +295,10 @@ describe('isDeviceId', () => {
 
 describe('parseViews', () => {
     it('reads the views of known devices', () => {
-        const views = { '0a1b2c3d': { type: 'appointment', allDay: true, result: '' } };
+        const views = {
+            '0a1b2c3d': { type: 'appointment', allDay: true, result: '' },
+            'a.f1fa48': { type: 'reminder', allDay: false, result: 'ok' },
+        };
         expect(parseViews(JSON.stringify(views))).to.deep.equal(views);
     });
 
