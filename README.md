@@ -39,7 +39,7 @@ Reads events from one or more [Google Calendar](https://calendar.google.com) cal
 | `info.connection` | true while at least one calendar could be read in the last cycle. |
 | `table` | JSON array with all entries of all calendars, sorted by start. |
 | `upcoming` | JSON array with the next entries, ready for a list widget. |
-| `draft.request` | Write the vis-2 browser instance ID here to open that browser's form. |
+| `draft.request` | Write the vis-2 browser instance ID here to open that browser's form; the adapter empties it again. |
 | `draft.view` | JSON object with `type`, `allDay` and `result` per browser, for vis bindings. |
 | `draft.<id>.type` | Type of the new entry: `appointment`, `reminder` or `birthday`. |
 | `draft.<id>.text` | Title or name of the new entry. |

@@ -99,6 +99,10 @@ class GoogleCalendar extends utils.Adapter {
             if (isDeviceId(state.val)) {
                 await this.openDraft(state.val);
             }
+            // A vis button shows itself active while the state equals its value; clear it once handled.
+            if (!this.stopping) {
+                await this.setStateAsync('draft.request', '', true);
+            }
             return;
         }
         const match = DEVICE_STATE.exec(relative);

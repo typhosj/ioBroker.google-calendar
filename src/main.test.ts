@@ -318,7 +318,14 @@ describe('draft per device', () => {
                 await internals.onStateChange(REQUEST, user(value));
             }
             expect(adapter.objects.size).to.equal(0);
-            expect(adapter.writes).to.deep.equal([]);
+            expect(adapter.writes.every(written => written === 'draft.request')).to.equal(true);
+            expect(adapter.states.get('draft.request')).to.equal('');
+        });
+
+        it('clears the request once handled, so the vis button does not stay active', async () => {
+            const { adapter } = await opened([A]);
+            expect(adapter.states.get('draft.request')).to.equal('');
+            expect(adapter.writes.at(-1)).to.equal('draft.request');
         });
 
         it('ignores an acknowledged request', async () => {
