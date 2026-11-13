@@ -296,8 +296,8 @@ describe('isDeviceId', () => {
 describe('parseViews', () => {
     it('reads the views of known devices', () => {
         const views = {
-            '0a1b2c3d': { type: 'appointment', allDay: true, result: '' },
-            'a.f1fa48': { type: 'reminder', allDay: false, result: 'ok' },
+            '0a1b2c3d': { type: 'appointment', allDay: true, result: '', editing: false, confirmDelete: false },
+            'a.f1fa48': { type: 'reminder', allDay: false, result: 'ok', editing: false, confirmDelete: false },
         };
         expect(parseViews(JSON.stringify(views))).to.deep.equal(views);
     });
@@ -315,6 +315,35 @@ describe('parseViews', () => {
 
     it('keeps only known fields with the right types', () => {
         const json = JSON.stringify({ '0a1b2c3d': { type: 'reminder', allDay: 'yes', result: 7, extra: 1 } });
-        expect(parseViews(json)).to.deep.equal({ '0a1b2c3d': { type: 'reminder', allDay: false, result: '' } });
+        expect(parseViews(json)).to.deep.equal({
+            '0a1b2c3d': { type: 'reminder', allDay: false, result: '', editing: false, confirmDelete: false },
+        });
+    });
+});
+
+describe('parseViews with edit fields', () => {
+    it('keeps editing and confirmDelete, defaulting both to false', () => {
+        const views = parseViews(
+            JSON.stringify({
+                '0a1b2c3d': { type: 'appointment', allDay: false, result: '', editing: true, confirmDelete: true },
+                ffff0000: { type: 'reminder' },
+                'a.f1fa48': { type: 'birthday', editing: 'yes', confirmDelete: 1 },
+            }),
+        );
+        expect(views['0a1b2c3d']).to.deep.equal({
+            type: 'appointment',
+            allDay: false,
+            result: '',
+            editing: true,
+            confirmDelete: true,
+        });
+        expect(views.ffff0000).to.deep.equal({
+            type: 'reminder',
+            allDay: false,
+            result: '',
+            editing: false,
+            confirmDelete: false,
+        });
+        expect(views['a.f1fa48']).to.include({ editing: false, confirmDelete: false });
     });
 });

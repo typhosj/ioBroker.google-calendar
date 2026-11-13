@@ -48,7 +48,7 @@ const TIME = /^([01]\d|2[0-3]):([0-5]\d)$/;
  *
  * @param d Date in the host time zone.
  */
-const isoDate = (d: Date): string => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+export const isoDate = (d: Date): string => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 /**
  * Local midnight of the day after `d`.
  *
@@ -228,6 +228,10 @@ export interface DeviceView {
     allDay: boolean;
     /** Result of the last save of this device. */
     result: string;
+    /** Whether the dialog edits an existing entry (`target` set). */
+    editing: boolean;
+    /** Whether the next delete press deletes. */
+    confirmDelete: boolean;
 }
 
 const DEVICE_ID = /^[0-9a-f]+(?:\.[0-9a-f]+)?$/;
@@ -264,17 +268,19 @@ export function parseViews(value: unknown): Record<string, DeviceView> {
         if (!isDeviceId(device) || !view || typeof view !== 'object') {
             continue;
         }
-        const { type, allDay, result } = view as Record<string, unknown>;
+        const { type, allDay, result, editing, confirmDelete } = view as Record<string, unknown>;
         views[device] = {
             type: typeof type === 'string' ? type : '',
             allDay: allDay === true,
             result: typeof result === 'string' ? result : '',
+            editing: editing === true,
+            confirmDelete: confirmDelete === true,
         };
     }
     return views;
 }
 
-/** The states of one device's draft, created below `draft.<device>` when the device first opens the dialog. */
+/** The states of one device's draft, created below `draft.<device>` on its first request or tap. */
 export const DRAFT_STATES: Record<string, ioBroker.StateCommon> = {
     type: {
         role: 'text',
@@ -307,6 +313,14 @@ export const DRAFT_STATES: Record<string, ioBroker.StateCommon> = {
     allDay: { role: 'switch', name: 'All day (appointments)', type: 'boolean', read: true, write: true, def: false },
     open: { role: 'switch', name: 'Dialog open', type: 'boolean', read: true, write: true, def: false },
     save: { role: 'button', name: 'Save the entry', type: 'boolean', read: false, write: true },
+    delete: {
+        role: 'button',
+        name: 'Delete the edited entry (press twice)',
+        type: 'boolean',
+        read: false,
+        write: true,
+    },
+    target: { role: 'json', name: 'Entry being edited', type: 'string', read: true, write: false, def: '' },
     result: { role: 'text', name: 'Result of the last save', type: 'string', read: true, write: false, def: '' },
 };
 
