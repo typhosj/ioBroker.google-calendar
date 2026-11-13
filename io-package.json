@@ -173,7 +173,7 @@
             "type": "state",
             "common": {
                 "role": "json",
-                "name": "Type, all-day and result per vis browser (for bindings)",
+                "name": "Type, all-day, result, editing and confirmDelete per vis browser (for bindings)",
                 "type": "string",
                 "read": true,
                 "write": false,

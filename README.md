@@ -53,7 +53,7 @@ Reads events from one or more [Google Calendar](https://calendar.google.com) cal
 | `draft.<id>.save` | Button: creates the entry from the form, or changes the edited entry. |
 | `draft.<id>.delete` | Button: the first press asks (`confirmDelete` in `draft.view`), the second deletes the edited entry. |
 | `draft.<id>.target` | The entry being edited (JSON), empty for a new entry. |
-| `draft.<id>.result` | `ok`, or the reason the last save failed (German, for the dialog). |
+| `draft.<id>.result` | `ok`, or the reason the last save or delete failed (German, for the dialog). |
 
 ### Creating entries
 
@@ -61,7 +61,7 @@ Every vis-2 browser has its own form, so two people can create entries at the sa
 
 A button writes `{instance}` to `draft.request`. On the first request the adapter creates the states of that browser; every request fills the form with defaults (next full hour, one hour long) and sets `draft.<id>.open` to true. Edit the fields, then press `draft.<id>.save`. The entry is created in the writable calendar configured for its type and the calendars are read again right away. `draft.<id>.result` holds `ok` or the reason for a failure; after success the text is cleared and `open` is set to false. When a user changes the start and it passes the end, the end follows: an earlier end date takes the start date, a timed end that is not after the start becomes one hour after it.
 
-To edit an entry, set the Calendar widget's **object ID on event click** (vis2-materialdesign) to `google-calendar.0.draft.edit`. A tap on an entry of a writable calendar opens the form of that browser filled with the entry; entries of read-only calendars open nothing. A birthday shows the real birth date of its series. **Save** changes title and times in Google; description, location and guests stay. A birthday changes as a series, every other entry alone, also one instance of a series created in Google. Changing the type moves the entry: it is created in the calendar of the new type and the old one is deleted; if that delete fails, `result` says so and the form goes on editing the new entry. `draft.<id>.delete` deletes the entry on the second press; any other change in between asks again. Use `editing` and `confirmDelete` from `draft.view` for the dialog title and the delete button.
+To edit an entry, set the Calendar widget's **object ID on event click** (vis2-materialdesign) to `google-calendar.0.draft.edit`. A tap on an entry of a writable calendar opens the form of that browser filled with the entry; entries of read-only calendars open nothing. A birthday shows the real birth date of its series. **Save** changes title and times in Google; description, location and guests stay. A birthday changes as a series, every other entry alone, also one instance of a series created in Google. Changing the type moves the entry: it is created in the calendar of the new type and the old one is deleted; if that delete fails, `result` says so and the form goes on editing the new entry. `draft.<id>.delete` deletes the entry on the second press; any other change in between asks again. When the calendar of the edited entry is no longer the writable calendar of its type (the configuration changed), save says the entry is gone and delete does nothing. Use `editing` and `confirmDelete` from `draft.view` for the dialog title and the delete button.
 
 vis bindings cannot contain `{instance}` inside an object ID. For those, read `draft.view` with `instance` as a variable, for example `{v:google-calendar.0.draft.view;i:instance;((v||[])[i]||[]).type}`.
 

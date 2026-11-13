@@ -226,7 +226,7 @@ export interface DeviceView {
     type: string;
     /** Whether the draft is all-day. */
     allDay: boolean;
-    /** Result of the last save of this device. */
+    /** Result of the last save or delete of this device. */
     result: string;
     /** Whether the dialog edits an existing entry (`target` set). */
     editing: boolean;
@@ -321,7 +321,14 @@ export const DRAFT_STATES: Record<string, ioBroker.StateCommon> = {
         write: true,
     },
     target: { role: 'json', name: 'Entry being edited', type: 'string', read: true, write: false, def: '' },
-    result: { role: 'text', name: 'Result of the last save', type: 'string', read: true, write: false, def: '' },
+    result: {
+        role: 'text',
+        name: 'Result of the last save or delete',
+        type: 'string',
+        read: true,
+        write: false,
+        def: '',
+    },
 };
 
 /**
