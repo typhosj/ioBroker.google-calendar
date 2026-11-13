@@ -1028,6 +1028,59 @@ describe('draft per device', () => {
                 await pending;
             });
 
+            it('opens nothing in a browser while its save runs, so the moved entry keeps its fields', async () => {
+                const other = row(termine, { _IDID: 'ev2', event: 'Friseur', _date: local(2026, 12, 3, 9, 0) });
+                const setup = withRows([appointment, other], { holdInsert: true, deleteStatus: 500 });
+                const { adapter, internals, releaseInsert } = setup;
+                await internals.onStateChange(EDIT, tap(A, appointment));
+                fill(adapter, A, { type: 'reminder' });
+                const pending = internals.onStateChange(id(A, 'save'), user(true));
+                await new Promise(resolve => setImmediate(resolve));
+                await internals.onStateChange(EDIT, tap(A, other));
+                await internals.onStateChange(REQUEST, user(A));
+                expect(adapter.states.get('draft.edit')).to.equal('');
+                expect(adapter.states.get('draft.request')).to.equal('');
+                releaseInsert();
+                await pending;
+                expect(target(adapter)).to.deep.equal({
+                    calendarId: erinnerungen.calendarId,
+                    eventId: 'new1',
+                    type: 'reminder',
+                    seriesId: '',
+                });
+                expect(adapter.states.get(`draft.${A}.text`)).to.equal('Zahnarzt');
+                expect(adapter.states.get(`draft.${A}.startDate`)).to.equal('2026-11-19');
+                expect(adapter.states.get(`draft.${A}.startTime`)).to.equal('18:00');
+                expect(adapter.states.get(`draft.${A}.type`)).to.equal('reminder');
+                expect(adapter.states.get(`draft.${A}.result`)).to.equal(
+                    'Neuer Eintrag angelegt, der alte konnte nicht gelöscht werden.',
+                );
+            });
+
+            it('opens the dialog of another browser while one browser saves', async () => {
+                const { adapter, internals, releaseInsert } = await editing(appointment, { holdInsert: true });
+                fill(adapter, A, { type: 'reminder' });
+                const pending = internals.onStateChange(id(A, 'save'), user(true));
+                await new Promise(resolve => setImmediate(resolve));
+                await internals.onStateChange(EDIT, tap(B, appointment));
+                expect(adapter.states.get(`draft.${B}.open`)).to.equal(true);
+                releaseInsert();
+                await pending;
+            });
+
+            it('opens nothing in a browser while its delete runs', async () => {
+                const { adapter, internals, releaseDelete } = await editing(appointment, { holdDelete: true });
+                await internals.onStateChange(id(A, 'delete'), user(true));
+                const pending = internals.onStateChange(id(A, 'delete'), user(true));
+                await new Promise(resolve => setImmediate(resolve));
+                await internals.onStateChange(REQUEST, user(A));
+                expect(target(adapter)).to.include({ eventId: 'ev1' });
+                expect(adapter.states.get(`draft.${A}.text`)).to.equal('Zahnarzt');
+                releaseDelete();
+                await pending;
+                expect(adapter.states.get(`draft.${A}.open`)).to.equal(false);
+            });
+
             it('deletes only the entry of the pressing browser', async () => {
                 const setup = withRows([appointment, row(termine, { _IDID: 'ev2' })]);
                 await setup.internals.onStateChange(EDIT, tap(A, appointment));

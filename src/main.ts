@@ -187,6 +187,10 @@ class GoogleCalendar extends utils.Adapter {
      * @param device vis-2 browser instance ID
      */
     private async openDraft(device: string): Promise<void> {
+        // A running save may still set the target; new fields would then be saved onto that entry.
+        if (this.saving.has(device)) {
+            return;
+        }
         await this.createDraft(device);
         const current = (await this.getStateAsync(`draft.${device}.type`))?.val;
         const type: EntryType = ENTRY_TYPES.includes(current as EntryType) ? (current as EntryType) : 'reminder';
@@ -200,7 +204,8 @@ class GoogleCalendar extends utils.Adapter {
     }
 
     /**
-     * Opens the dialog of a device filled with a tapped entry of a writable calendar.
+     * Opens the dialog of a device filled with a tapped entry of a writable calendar; nothing while
+     * that device saves or deletes.
      * Known limit: before the first read after a start the adapter has no rows, so a tap opens nothing.
      *
      * @param request What the calendar widget wrote
@@ -222,7 +227,7 @@ class GoogleCalendar extends utils.Adapter {
                 return;
             }
         }
-        if (this.stopping) {
+        if (this.stopping || this.saving.has(request.device)) {
             return;
         }
         await this.createDraft(request.device);
