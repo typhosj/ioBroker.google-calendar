@@ -1,7 +1,7 @@
 /** Options for one request; a body is sent as given. */
 export interface HttpRequest {
     /** HTTP method, GET when omitted. */
-    method?: 'GET' | 'POST';
+    method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
     /** Request headers. */
     headers?: Record<string, string>;
     /** Request body, sent as given. */

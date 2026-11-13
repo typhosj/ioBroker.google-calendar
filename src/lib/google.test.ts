@@ -1,5 +1,14 @@
 import { expect } from 'chai';
-import { describeError, insertEvent, listEvents, MAX_PAGES, parseEvent } from './google';
+import {
+    deleteEvent,
+    describeError,
+    getEvent,
+    insertEvent,
+    listEvents,
+    MAX_PAGES,
+    parseEvent,
+    patchEvent,
+} from './google';
 import { GoogleError, type Http } from './http';
 
 const T0 = new Date('2026-11-01T00:00:00Z');
@@ -142,5 +151,92 @@ describe('insertEvent', () => {
         expect((error as GoogleError).status).to.equal(403);
         const noId: Http = () => Promise.resolve({ status: 200, body: {} });
         await expect(insertEvent(noId, 'tok', 'c', body)).to.be.rejectedWith(GoogleError);
+    });
+});
+
+/**
+ * Records one request and answers with the given status and body.
+ *
+ * @param status HTTP status to answer with.
+ * @param body Body to answer with.
+ * @param seen List the request is appended to.
+ */
+function answer(
+    status: number,
+    body: unknown,
+    seen: { url: string; method?: string; body?: string; headers?: Record<string, string> }[],
+): Http {
+    return (url, request) => {
+        seen.push({ url, method: request?.method, body: request?.body, headers: request?.headers });
+        return Promise.resolve({ status, body });
+    };
+}
+
+describe('getEvent', () => {
+    it('reads one event by encoded calendar and event ID', async () => {
+        const seen: { url: string; method?: string }[] = [];
+        const event = await getEvent(answer(200, allDay, seen), 'tok', 'a#b@example.test', 'r2_x');
+        expect(event).to.deep.equal(allDay);
+        expect(new URL(seen[0].url).pathname).to.equal('/calendar/v3/calendars/a%23b%40example.test/events/r2_x');
+        expect(seen[0].method).to.equal(undefined);
+    });
+
+    it('throws on a status other than 200 and on a malformed event', async () => {
+        for (const [status, body] of [
+            [404, null],
+            [200, { id: '' }],
+            [200, 'x'],
+        ] as const) {
+            const error = await getEvent(answer(status, body, []), 'tok', 'c', 'e').catch((e: unknown) => e);
+            expect(error, `${status}`).to.be.instanceOf(GoogleError);
+            expect((error as GoogleError).status).to.equal(status);
+        }
+    });
+});
+
+describe('patchEvent', () => {
+    const body = {
+        summary: 'Neu',
+        start: { date: '2026-11-15', dateTime: null },
+        end: { date: '2026-11-16', dateTime: null },
+    } as const;
+
+    it('sends a PATCH with JSON body and token', async () => {
+        const seen: { url: string; method?: string; body?: string; headers?: Record<string, string> }[] = [];
+        await patchEvent(answer(200, { id: 'e1' }, seen), 'tok', 'c@example.test', 'e1_20261115', body);
+        expect(seen[0].method).to.equal('PATCH');
+        expect(new URL(seen[0].url).pathname).to.equal('/calendar/v3/calendars/c%40example.test/events/e1_20261115');
+        expect(JSON.parse(seen[0].body ?? '')).to.deep.equal(body);
+        expect(seen[0].headers).to.deep.equal({ authorization: 'Bearer tok', 'content-type': 'application/json' });
+    });
+
+    it('throws with the status on anything but 200', async () => {
+        for (const status of [204, 400, 403, 404, 410, 500]) {
+            const error = await patchEvent(answer(status, null, []), 'tok', 'c', 'e', body).catch((e: unknown) => e);
+            expect((error as GoogleError).status, `${status}`).to.equal(status);
+        }
+    });
+});
+
+describe('deleteEvent', () => {
+    it('sends a DELETE with the token', async () => {
+        const seen: { url: string; method?: string; headers?: Record<string, string> }[] = [];
+        await deleteEvent(answer(204, null, seen), 'tok', 'c@example.test', 'e1');
+        expect(seen[0].method).to.equal('DELETE');
+        expect(new URL(seen[0].url).pathname).to.equal('/calendar/v3/calendars/c%40example.test/events/e1');
+        expect(seen[0].headers).to.deep.equal({ authorization: 'Bearer tok' });
+    });
+
+    it('counts an event that is already gone as deleted', async () => {
+        for (const status of [200, 204, 404, 410]) {
+            await deleteEvent(answer(status, null, []), 'tok', 'c', 'e');
+        }
+    });
+
+    it('throws with the status on other answers', async () => {
+        for (const status of [400, 401, 403, 500]) {
+            const error = await deleteEvent(answer(status, null, []), 'tok', 'c', 'e').catch((e: unknown) => e);
+            expect((error as GoogleError).status, `${status}`).to.equal(status);
+        }
     });
 });

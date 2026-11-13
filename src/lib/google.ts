@@ -37,6 +37,19 @@ export interface EventBody {
     reminders: { useDefault: true };
 }
 
+/** Start or end in a patch: the other kind is cleared, so a timed entry can become all-day and back. */
+export type PatchTime = { date: string; dateTime: null } | { dateTime: string; date: null };
+
+/** Body of `events.patch`: only title and times change, everything else on the event stays. */
+export interface EventPatch {
+    /** New title. */
+    summary: string;
+    /** New start. */
+    start: PatchTime;
+    /** New end; exclusive for all-day entries. */
+    end: PatchTime;
+}
+
 /** Base URL of the Google Calendar v3 REST API. */
 export const API_BASE = 'https://www.googleapis.com/calendar/v3';
 /** Items requested per page. */
@@ -173,4 +186,74 @@ export async function insertEvent(http: Http, token: string, calendarId: string,
         throw new GoogleError(`Creating the event failed (HTTP ${response.status})`, response.status);
     }
     return record.id;
+}
+
+/**
+ * URL of one event.
+ *
+ * @param calendarId Calendar ID, URL-encoded here.
+ * @param eventId Event or instance ID, URL-encoded here.
+ */
+const eventUrl = (calendarId: string, eventId: string): string =>
+    `${API_BASE}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`;
+
+/**
+ * Reads one event, e.g. the series master of a birthday.
+ *
+ * @param http Transport for the API request.
+ * @param token Bearer access token.
+ * @param calendarId Calendar ID.
+ * @param eventId Event ID.
+ */
+export async function getEvent(http: Http, token: string, calendarId: string, eventId: string): Promise<GoogleEvent> {
+    const response = await http(eventUrl(calendarId, eventId), { headers: { authorization: `Bearer ${token}` } });
+    const event = response.status === 200 ? parseEvent(response.body) : null;
+    if (!event) {
+        throw new GoogleError(`Reading the event failed (HTTP ${response.status})`, response.status);
+    }
+    return event;
+}
+
+/**
+ * Changes title and times of one event or one instance of a series.
+ *
+ * @param http Transport for the API request.
+ * @param token Bearer access token.
+ * @param calendarId Calendar ID.
+ * @param eventId Event or instance ID.
+ * @param body Fields to change.
+ */
+export async function patchEvent(
+    http: Http,
+    token: string,
+    calendarId: string,
+    eventId: string,
+    body: EventPatch,
+): Promise<void> {
+    const response = await http(eventUrl(calendarId, eventId), {
+        method: 'PATCH',
+        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+    });
+    if (response.status !== 200) {
+        throw new GoogleError(`Changing the event failed (HTTP ${response.status})`, response.status);
+    }
+}
+
+/**
+ * Deletes one event, or cancels one instance of a series; an event already gone counts as deleted.
+ *
+ * @param http Transport for the API request.
+ * @param token Bearer access token.
+ * @param calendarId Calendar ID.
+ * @param eventId Event or instance ID.
+ */
+export async function deleteEvent(http: Http, token: string, calendarId: string, eventId: string): Promise<void> {
+    const response = await http(eventUrl(calendarId, eventId), {
+        method: 'DELETE',
+        headers: { authorization: `Bearer ${token}` },
+    });
+    if (![200, 204, 404, 410].includes(response.status)) {
+        throw new GoogleError(`Deleting the event failed (HTTP ${response.status})`, response.status);
+    }
 }
