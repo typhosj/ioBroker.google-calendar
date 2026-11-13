@@ -120,7 +120,13 @@ describe('checkTarget', () => {
         birthday: calendar('geburtstage@example.test', 'birthday'),
     };
     const stored = (patch: object): string =>
-        JSON.stringify({ calendarId: 'termine@example.test', eventId: 'e1', type: 'appointment', seriesId: '', ...patch });
+        JSON.stringify({
+            calendarId: 'termine@example.test',
+            eventId: 'e1',
+            type: 'appointment',
+            seriesId: '',
+            ...patch,
+        });
 
     it('accepts a target in the writable calendar of its type', () => {
         expect(checkTarget(stored({}), writable)).to.deep.equal({
@@ -221,7 +227,12 @@ describe('draftFromRow', () => {
     });
 
     it('opens an all-day reminder with its time visible, so a time can be set', () => {
-        const reminder = row({ _type: 'reminder', _allDay: true, _date: local(2026, 11, 14), _end: local(2026, 11, 15) });
+        const reminder = row({
+            _type: 'reminder',
+            _allDay: true,
+            _date: local(2026, 11, 14),
+            _end: local(2026, 11, 15),
+        });
         expect(draftFromRow(reminder, NOW)).to.deep.equal({
             type: 'reminder',
             text: 'Zahnarzt',
@@ -260,7 +271,12 @@ describe('draftFromRow', () => {
     });
 
     it('shows the birth date also for a timed birthday, with suggested times', () => {
-        const timed = row({ _type: 'birthday', event: 'Oma', _date: local(2026, 11, 15, 9, 0), _end: local(2026, 11, 15, 10, 0) });
+        const timed = row({
+            _type: 'birthday',
+            event: 'Oma',
+            _date: local(2026, 11, 15, 9, 0),
+            _end: local(2026, 11, 15, 10, 0),
+        });
         expect(draftFromRow(timed, NOW, '1950-11-15')).to.deep.equal({
             type: 'birthday',
             text: 'Oma',
@@ -271,7 +287,11 @@ describe('draftFromRow', () => {
             allDay: false,
         });
         expect(draftFromRow(timed, NOW)).to.include({ startDate: '2026-11-15', endDate: '2026-11-15' });
-        const lateNight = row({ _type: 'birthday', _date: local(2026, 11, 15, 23, 30), _end: local(2026, 11, 16, 0, 30) });
+        const lateNight = row({
+            _type: 'birthday',
+            _date: local(2026, 11, 15, 23, 30),
+            _end: local(2026, 11, 16, 0, 30),
+        });
         expect(draftFromRow(lateNight, NOW)).to.include({ startDate: '2026-11-15', endDate: '2026-11-15' });
     });
 });

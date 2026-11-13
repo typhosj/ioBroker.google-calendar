@@ -732,7 +732,12 @@ describe('draft per device', () => {
             });
 
             it('shows the birth date of the master for a timed instance of a birthday series', async () => {
-                const timed = { ...birthday, _allDay: false, _date: local(2026, 11, 15, 9), _end: local(2026, 11, 15, 10) };
+                const timed = {
+                    ...birthday,
+                    _allDay: false,
+                    _date: local(2026, 11, 15, 9),
+                    _end: local(2026, 11, 15, 10),
+                };
                 const { adapter, internals } = withRows([timed], {
                     master: { id: 's1', summary: 'Oma', start: { date: '1950-11-15' }, end: { date: '1950-11-16' } },
                 });
