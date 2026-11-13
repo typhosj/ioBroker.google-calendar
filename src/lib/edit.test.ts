@@ -220,6 +220,21 @@ describe('draftFromRow', () => {
         expect([yearEnd.startDate, yearEnd.endDate]).to.deep.equal(['2026-12-31', '2026-12-31']);
     });
 
+    it('opens an all-day reminder with its time visible, so a time can be set', () => {
+        const reminder = row({ _type: 'reminder', _allDay: true, _date: local(2026, 11, 14), _end: local(2026, 11, 15) });
+        expect(draftFromRow(reminder, NOW)).to.deep.equal({
+            type: 'reminder',
+            text: 'Zahnarzt',
+            startDate: '2026-11-14',
+            startTime: '15:00',
+            endDate: '2026-11-14',
+            endTime: '16:00',
+            allDay: false,
+        });
+        const atMidnight = draftFromRow(reminder, new Date(2026, 10, 13, 23, 59));
+        expect([atMidnight.startTime, atMidnight.allDay]).to.deep.equal(['00:00', false]);
+    });
+
     it('keeps a zero-length all-day entry on its start day', () => {
         const zero = draftFromRow(row({ _allDay: true, _date: local(2026, 11, 14), _end: local(2026, 11, 14) }), NOW);
         expect([zero.startDate, zero.endDate]).to.deep.equal(['2026-11-14', '2026-11-14']);

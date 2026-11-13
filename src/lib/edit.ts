@@ -176,7 +176,8 @@ export function draftFromRow(row: Row, now: Date, birthDate = ''): DraftValues {
         startTime: suggested.startTime,
         endDate: isoDate(last < start ? start : last),
         endTime: suggested.endTime,
-        allDay: true,
+        // The dialog hides the time of an all-day entry, and only an appointment shows the all-day switch.
+        allDay: row._type === 'appointment',
     };
 }
 
