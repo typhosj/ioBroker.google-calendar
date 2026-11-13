@@ -40,7 +40,8 @@ Reads events from one or more [Google Calendar](https://calendar.google.com) cal
 | `table` | JSON array with all entries of all calendars, sorted by start. |
 | `upcoming` | JSON array with the next entries, ready for a list widget. |
 | `draft.request` | Write the vis-2 browser instance ID here to open that browser's form; the adapter empties it again. |
-| `draft.view` | JSON object with `type`, `allDay` and `result` per browser, for vis bindings. |
+| `draft.edit` | Written by the vis calendar widget (option **object ID on event click**): JSON `{ "instance": "<id>", "event": <tapped row> }`. Opens that browser's form filled with the entry; the adapter empties it again. |
+| `draft.view` | JSON object with `type`, `allDay`, `result`, `editing` and `confirmDelete` per browser, for vis bindings. |
 | `draft.<id>.type` | Type of the new entry: `appointment`, `reminder` or `birthday`. |
 | `draft.<id>.text` | Title or name of the new entry. |
 | `draft.<id>.startDate` | Date, `YYYY-MM-DD`. |
@@ -49,7 +50,9 @@ Reads events from one or more [Google Calendar](https://calendar.google.com) cal
 | `draft.<id>.endTime` | End time, `HH:MM` (appointments). |
 | `draft.<id>.allDay` | All-day entry (appointments). |
 | `draft.<id>.open` | true while the dialog of this browser is open; false again after a successful save. |
-| `draft.<id>.save` | Button: creates the entry from the form. |
+| `draft.<id>.save` | Button: creates the entry from the form, or changes the edited entry. |
+| `draft.<id>.delete` | Button: the first press asks (`confirmDelete` in `draft.view`), the second deletes the edited entry. |
+| `draft.<id>.target` | The entry being edited (JSON), empty for a new entry. |
 | `draft.<id>.result` | `ok`, or the reason the last save failed (German, for the dialog). |
 
 ### Creating entries
@@ -57,6 +60,8 @@ Reads events from one or more [Google Calendar](https://calendar.google.com) cal
 Every vis-2 browser has its own form, so two people can create entries at the same time. `<id>` is the browser instance ID that vis-2 generates: eight characters, hex digits with usually one dot inside, such as `a.f1fa48` (the dot adds one level to the state IDs). In vis it is available as the binding `{instance}`, for example `google-calendar.0.draft.{instance}.text` as a widget object ID.
 
 A button writes `{instance}` to `draft.request`. On the first request the adapter creates the states of that browser; every request fills the form with defaults (next full hour, one hour long) and sets `draft.<id>.open` to true. Edit the fields, then press `draft.<id>.save`. The entry is created in the writable calendar configured for its type and the calendars are read again right away. `draft.<id>.result` holds `ok` or the reason for a failure; after success the text is cleared and `open` is set to false. When a user changes the start and it passes the end, the end follows: an earlier end date takes the start date, a timed end that is not after the start becomes one hour after it.
+
+To edit an entry, set the Calendar widget's **object ID on event click** (vis2-materialdesign) to `google-calendar.0.draft.edit`. A tap on an entry of a writable calendar opens the form of that browser filled with the entry; entries of read-only calendars open nothing. A birthday shows the real birth date of its series. **Save** changes title and times in Google; description, location and guests stay. A birthday changes as a series, every other entry alone, also one instance of a series created in Google. Changing the type moves the entry: it is created in the calendar of the new type and the old one is deleted; if that delete fails, `result` says so and the form goes on editing the new entry. `draft.<id>.delete` deletes the entry on the second press; any other change in between asks again. Use `editing` and `confirmDelete` from `draft.view` for the dialog title and the delete button.
 
 vis bindings cannot contain `{instance}` inside an object ID. For those, read `draft.view` with `instance` as a variable, for example `{v:google-calendar.0.draft.view;i:instance;((v||[])[i]||[]).type}`.
 
@@ -72,6 +77,7 @@ The states of a browser stay until they are deleted by hand, for example after i
 * (typhosj) initial version: read calendars with a service account and create entries from the draft states
 * (typhosj) the end of a new entry follows its start when the start passes it
 * (typhosj) every vis browser has its own form for new entries
+* (typhosj) edit and delete entries from the vis calendar: a tap opens the form filled with the entry, delete asks once
 
 ## License
 MIT License
