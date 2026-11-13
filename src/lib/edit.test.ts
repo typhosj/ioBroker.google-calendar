@@ -1,6 +1,8 @@
 import { expect } from 'chai';
+import type { CalendarConfig } from './config';
 import {
     changeErrorText,
+    checkTarget,
     deleteErrorText,
     draftFromRow,
     DUPLICATE_TEXT,
@@ -101,6 +103,56 @@ describe('parseTarget', () => {
             JSON.stringify({ ...target, calendarId: 3 }),
         ]) {
             expect(parseTarget(value), String(value)).to.equal(null);
+        }
+    });
+});
+
+describe('checkTarget', () => {
+    const calendar = (calendarId: string, type: CalendarConfig['type']): CalendarConfig => ({
+        name: calendarId,
+        calendarId,
+        type,
+        color: '#123456',
+        writable: true,
+    });
+    const writable = {
+        appointment: calendar('termine@example.test', 'appointment'),
+        birthday: calendar('geburtstage@example.test', 'birthday'),
+    };
+    const stored = (patch: object): string =>
+        JSON.stringify({ calendarId: 'termine@example.test', eventId: 'e1', type: 'appointment', seriesId: '', ...patch });
+
+    it('accepts a target in the writable calendar of its type', () => {
+        expect(checkTarget(stored({}), writable)).to.deep.equal({
+            calendarId: 'termine@example.test',
+            eventId: 'e1',
+            type: 'appointment',
+            seriesId: '',
+        });
+        expect(checkTarget(stored({ calendarId: 'geburtstage@example.test', type: 'birthday' }), writable)).to.include({
+            type: 'birthday',
+        });
+    });
+
+    it('means a new entry when the state is empty', () => {
+        for (const value of [undefined, null, '']) {
+            expect(checkTarget(value, writable), String(value)).to.equal(null);
+        }
+    });
+
+    it('rejects a broken target, another calendar of the type, or a type without writable calendar', () => {
+        for (const value of [
+            '{',
+            '[]',
+            '{}',
+            42,
+            false,
+            stored({ calendarId: 'old@example.test' }),
+            stored({ type: 'birthday', seriesId: 's9' }),
+            stored({ type: 'reminder' }),
+            stored({ type: 'party' }),
+        ]) {
+            expect(checkTarget(value, writable), String(value)).to.equal(undefined);
         }
     });
 });

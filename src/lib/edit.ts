@@ -1,4 +1,4 @@
-import { ENTRY_TYPES, type EntryType } from './config';
+import { ENTRY_TYPES, type EntryType, type Settings } from './config';
 import { draftDefaults, isDeviceId, isoDate, saveErrorText } from './draft';
 import type { EventBody, EventPatch, EventTime, PatchTime } from './google';
 import { GoogleError } from './http';
@@ -95,6 +95,23 @@ export function parseTarget(value: unknown): Target | null {
         type: record.type as EntryType,
         seriesId: typeof record.seriesId === 'string' ? record.seriesId : '',
     };
+}
+
+/**
+ * Reads `draft.<device>.target` and checks it against the configuration: its calendar must be the
+ * writable calendar of its type. The state is not write-protected in practice, and the
+ * configuration may have changed since the dialog opened.
+ *
+ * @param value State value.
+ * @param writable Writable calendar per type.
+ * @returns null for an empty state (a new entry), undefined for a broken or no longer valid target.
+ */
+export function checkTarget(value: unknown, writable: Settings['writable']): Target | null | undefined {
+    if (value === undefined || value === null || value === '') {
+        return null;
+    }
+    const target = parseTarget(value);
+    return target && writable[target.type]?.calendarId === target.calendarId ? target : undefined;
 }
 
 /**

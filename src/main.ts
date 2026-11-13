@@ -15,11 +15,12 @@ import {
 } from './lib/draft';
 import {
     changeErrorText,
+    checkTarget,
     deleteErrorText,
     draftFromRow,
     DUPLICATE_TEXT,
+    GONE_TEXT,
     parseEditRequest,
-    parseTarget,
     patchBody,
     targetOf,
     writeId,
@@ -248,6 +249,17 @@ class GoogleCalendar extends utils.Adapter {
     }
 
     /**
+     * The edited entry of a device, checked against the configuration.
+     *
+     * @param device Device ID
+     * @param google Settings of this run
+     * @returns null for a new entry, undefined for a broken or no longer valid target
+     */
+    private async readTarget(device: string, google: Google): Promise<Target | null | undefined> {
+        return checkTarget((await this.getStateAsync(`draft.${device}.target`))?.val, google.settings.writable);
+    }
+
+    /**
      * Writes one draft state, acknowledged, and keeps `draft.view` in step.
      *
      * @param device Device ID
@@ -327,7 +339,11 @@ class GoogleCalendar extends utils.Adapter {
                 await this.setField(device, 'result', 'Für diesen Typ ist kein beschreibbarer Kalender eingerichtet.');
                 return;
             }
-            const target = parseTarget((await this.getStateAsync(`draft.${device}.target`))?.val);
+            const target = await this.readTarget(device, google);
+            if (target === undefined) {
+                await this.setField(device, 'result', GONE_TEXT);
+                return;
+            }
             const token = await google.token();
             if (target && target.type === result.type) {
                 try {
@@ -391,7 +407,7 @@ class GoogleCalendar extends utils.Adapter {
      */
     private async remove(device: string): Promise<void> {
         const google = this.google;
-        const target = parseTarget((await this.getStateAsync(`draft.${device}.target`))?.val);
+        const target = google && (await this.readTarget(device, google));
         if (!google || !target) {
             return;
         }

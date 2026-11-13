@@ -843,6 +843,102 @@ describe('draft per device', () => {
             });
         });
 
+        describe('target check', () => {
+            const GONE = 'Diesen Eintrag gibt es nicht mehr.';
+            const writes = (calls: Call[]): Call[] => calls.filter(c => c.method !== 'GET');
+            /**
+             * Changes the settings of a running adapter, as after a restart with a new configuration.
+             *
+             * @param internals Adapter internals
+             * @param changed New settings
+             */
+            function reconfigure(internals: Internals, changed: Settings): void {
+                if (internals.google) {
+                    internals.google.settings = changed;
+                }
+            }
+            /**
+             * Opens the appointment for editing, then replaces the stored target of device A.
+             *
+             * @param value Raw value of `draft.<A>.target`
+             * @param options Options of the fake Google transport
+             */
+            async function forged(
+                value: unknown,
+                options: Parameters<typeof startCycle>[0] = {},
+            ): Promise<ReturnType<typeof startCycle>> {
+                const setup = await editing(appointment, options);
+                setup.adapter.states.set(`draft.${A}.target`, value);
+                return setup;
+            }
+            const forgedBirthday = JSON.stringify({
+                calendarId: termine.calendarId,
+                eventId: 'ev1',
+                type: 'birthday',
+                seriesId: 'series9',
+            });
+            const elsewhere = JSON.stringify({
+                calendarId: 'old@example.test',
+                eventId: 'ev1',
+                type: 'appointment',
+                seriesId: '',
+            });
+
+            it('refuses to save an entry whose calendar is no longer configured for its type', async () => {
+                const { adapter, internals, calls } = await editing(appointment);
+                const moved = calendar('Neu', 'appointment');
+                reconfigure(internals, { ...all, calendars: [moved, erinnerungen], writable: { appointment: moved } });
+                await internals.onStateChange(id(A, 'save'), user(true));
+                expect(writes(calls)).to.deep.equal([]);
+                expect(adapter.states.get(`draft.${A}.result`)).to.equal(GONE);
+                expect(adapter.states.get(`draft.${A}.open`)).to.equal(true);
+            });
+
+            it('refuses to delete an entry whose calendar is no longer configured for its type', async () => {
+                const { adapter, internals, calls } = await editing(appointment);
+                reconfigure(internals, { ...all, writable: { reminder: erinnerungen, birthday: geburtstage } });
+                await internals.onStateChange(id(A, 'delete'), user(true));
+                await internals.onStateChange(id(A, 'delete'), user(true));
+                expect(writes(calls)).to.deep.equal([]);
+                expect(views(adapter)[A].confirmDelete).to.equal(false);
+            });
+
+            it('neither saves nor deletes a forged or stale target', async () => {
+                for (const value of [forgedBirthday, elsewhere]) {
+                    const save = await forged(value);
+                    fill(save.adapter, A, { type: 'birthday' });
+                    await save.internals.onStateChange(id(A, 'save'), user(true));
+                    expect(writes(save.calls), value).to.deep.equal([]);
+                    expect(save.adapter.states.get(`draft.${A}.result`), value).to.equal(GONE);
+
+                    const remove = await forged(value);
+                    await remove.internals.onStateChange(id(A, 'delete'), user(true));
+                    await remove.internals.onStateChange(id(A, 'delete'), user(true));
+                    expect(writes(remove.calls), value).to.deep.equal([]);
+                    expect(views(remove.adapter)[A].confirmDelete, value).to.equal(false);
+                }
+            });
+
+            it('reports a broken target as gone instead of creating a duplicate', async () => {
+                for (const value of ['{', '[]', '{}', 'null', JSON.stringify({ type: 'appointment' }), 42, true]) {
+                    const { adapter, internals, calls, posts } = await forged(value);
+                    await internals.onStateChange(id(A, 'save'), user(true));
+                    expect(posts, String(value)).to.deep.equal([]);
+                    expect(writes(calls), String(value)).to.deep.equal([]);
+                    expect(adapter.states.get(`draft.${A}.result`), String(value)).to.equal(GONE);
+                }
+            });
+
+            it('creates a new entry when the target is empty', async () => {
+                for (const value of ['', null, undefined]) {
+                    const { adapter, internals, posts } = await forged(value);
+                    await internals.onStateChange(id(A, 'save'), user(true));
+                    expect(posts, String(value)).to.have.length(1);
+                    expect(adapter.states.get(`draft.${A}.result`), String(value)).to.equal('ok');
+                }
+            });
+        });
+
         describe('delete', () => {
             it('asks on the first press and deletes on the second', async () => {
                 const { adapter, internals, calls, triggered } = await editing(appointment);
