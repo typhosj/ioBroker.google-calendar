@@ -8,7 +8,9 @@ import { lastDay, timeText, type Row } from './rows';
 /** Largest accepted `draft.edit` value in characters; one table row is far below. */
 export const MAX_EDIT_CHARS = 10_000;
 
+/** Result of a save whose entry no longer exists or no longer passes the configuration check. */
 export const GONE_TEXT = 'Diesen Eintrag gibt es nicht mehr.';
+/** Result of a type change whose new entry was created but whose old entry could not be deleted. */
 export const DUPLICATE_TEXT = 'Neuer Eintrag angelegt, der alte konnte nicht gelöscht werden.';
 
 /** What a tap on a calendar event asks for. */
@@ -35,12 +37,19 @@ export interface Target {
 
 /** Field values of a draft. */
 export interface DraftValues {
+    /** Entry type. */
     type: EntryType;
+    /** Title. */
     text: string;
+    /** Start date, `YYYY-MM-DD`. */
     startDate: string;
+    /** Start time, `HH:MM`. */
     startTime: string;
+    /** End date, `YYYY-MM-DD`; inclusive for an all-day entry. */
     endDate: string;
+    /** End time, `HH:MM`. */
     endTime: string;
+    /** Whether the entry lasts whole days. */
     allDay: boolean;
 }
 

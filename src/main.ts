@@ -368,6 +368,9 @@ class GoogleCalendar extends utils.Adapter {
                 }
                 this.log.info(`Changed an entry of type ${result.type} in calendar "${calendar.name}"`);
             } else {
+                // Known limit: when the insert times out after Google created the event, or the adapter
+                // stops between insert and delete, the target stays on the old entry and the next save
+                // inserts again. The duplicate is visible in the calendar; nothing is lost.
                 const newId = await insertEvent(google.http, token, calendar.calendarId, result.body);
                 if (target) {
                     try {
