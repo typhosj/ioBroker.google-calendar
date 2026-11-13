@@ -139,6 +139,7 @@ interface Call {
  * @param options.insertStatus Status of the POST answer
  * @param options.holdInsert Keep the POST pending until releaseInsert()
  * @param options.patchStatus Status of a PATCH answer
+ * @param options.holdDelete Keep the DELETE pending until releaseDelete()
  * @param options.deleteStatus Status of a DELETE answer
  * @param options.master Body of a GET of one event; none answers 404
  * @param options.settings Settings instead of the default ones
@@ -149,6 +150,7 @@ function startCycle(
         holdInsert?: boolean;
         patchStatus?: number;
         deleteStatus?: number;
+        holdDelete?: boolean;
         master?: unknown;
         settings?: Settings;
     } = {},
@@ -159,6 +161,7 @@ function startCycle(
     calls: Call[];
     triggered: () => number;
     releaseInsert: () => void;
+    releaseDelete: () => void;
 } {
     const adapter = createAdapter({});
     const internals = adapter as unknown as Internals;
@@ -166,6 +169,10 @@ function startCycle(
     const calls: Call[] = [];
     let count = 0;
     let release: () => void = () => undefined;
+    let releaseDeleteFn: () => void = () => undefined;
+    const heldDelete = new Promise<void>(resolve => {
+        releaseDeleteFn = resolve;
+    });
     const held = new Promise<void>(resolve => {
         release = resolve;
     });
@@ -183,7 +190,8 @@ function startCycle(
             return Promise.resolve({ status: options.patchStatus ?? 200, body: { id: 'patched' } });
         }
         if (method === 'DELETE') {
-            return Promise.resolve({ status: options.deleteStatus ?? 204, body: null });
+            const answer = { status: options.deleteStatus ?? 204, body: null };
+            return options.holdDelete ? heldDelete.then(() => answer) : Promise.resolve(answer);
         }
         posts.push({ url });
         const answer = { status: options.insertStatus ?? 200, body: { id: 'new1' } };
@@ -196,7 +204,15 @@ function startCycle(
             count++;
         },
     };
-    return { adapter, internals, posts, calls, triggered: () => count, releaseInsert: release };
+    return {
+        adapter,
+        internals,
+        posts,
+        calls,
+        triggered: () => count,
+        releaseInsert: release,
+        releaseDelete: releaseDeleteFn,
+    };
 }
 
 function unload(adapter: FakeAdapter): void {
@@ -886,6 +902,34 @@ describe('draft per device', () => {
                 await internals.onStateChange(id(A, 'delete'), { val: true, ack: true });
                 expect(calls.filter(c => c.method === 'DELETE')).to.deep.equal([]);
                 expect(views(adapter)[A].confirmDelete).to.equal(false);
+            });
+
+            it('does not delete while a save of the same browser is running', async () => {
+                const { adapter, internals, calls, releaseInsert } = await editing(appointment, { holdInsert: true });
+                fill(adapter, A, { type: 'reminder' });
+                const pending = internals.onStateChange(id(A, 'save'), user(true));
+                await new Promise(resolve => setImmediate(resolve));
+                await internals.onStateChange(id(A, 'delete'), user(true));
+                await internals.onStateChange(id(A, 'delete'), user(true));
+                expect(calls.filter(c => c.method === 'DELETE')).to.deep.equal([]);
+                expect(adapter.states.get(`draft.${A}.result`)).to.equal('Speichern läuft noch …');
+                releaseInsert();
+                await pending;
+            });
+
+            it('does not save while a delete of the same browser is running', async () => {
+                const { adapter, internals, calls, posts, releaseDelete } = await editing(appointment, {
+                    holdDelete: true,
+                });
+                await internals.onStateChange(id(A, 'delete'), user(true));
+                const pending = internals.onStateChange(id(A, 'delete'), user(true));
+                await new Promise(resolve => setImmediate(resolve));
+                await internals.onStateChange(id(A, 'save'), user(true));
+                expect(calls.filter(c => c.method === 'PATCH')).to.deep.equal([]);
+                expect(posts).to.deep.equal([]);
+                expect(adapter.states.get(`draft.${A}.result`)).to.equal('Speichern läuft noch …');
+                releaseDelete();
+                await pending;
             });
 
             it('deletes only the entry of the pressing browser', async () => {
