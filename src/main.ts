@@ -13,7 +13,20 @@ import {
     type DeviceView,
     type Draft,
 } from './lib/draft';
-import { describeError, insertEvent, listEvents } from './lib/google';
+import {
+    changeErrorText,
+    deleteErrorText,
+    draftFromRow,
+    DUPLICATE_TEXT,
+    parseEditRequest,
+    parseTarget,
+    patchBody,
+    targetOf,
+    writeId,
+    type EditRequest,
+    type Target,
+} from './lib/edit';
+import { deleteEvent, describeError, getEvent, insertEvent, listEvents, patchEvent } from './lib/google';
 import { createHttp, type Http } from './lib/http';
 import { MAX_BACKOFF_MS, nextDelay, startLoop } from './lib/loop';
 import { sortRows, toRow, type Row } from './lib/rows';
@@ -105,11 +118,30 @@ class GoogleCalendar extends utils.Adapter {
             }
             return;
         }
+        if (relative === 'draft.edit') {
+            const request = parseEditRequest(state.val);
+            if (request) {
+                await this.openEdit(request);
+            }
+            if (!this.stopping) {
+                await this.setStateAsync('draft.edit', '', true);
+            }
+            return;
+        }
         const match = DEVICE_STATE.exec(relative);
         if (!match || !this.views[match[1]]) {
             return;
         }
         const [, device, field] = match;
+        if (field === 'delete') {
+            if (state.val === true) {
+                await this.remove(device);
+            }
+            return;
+        }
+        if (this.views[device].confirmDelete) {
+            await this.publishView(device, { confirmDelete: false });
+        }
         if (field === 'type' || field === 'allDay') {
             await this.publishView(
                 device,
@@ -124,11 +156,11 @@ class GoogleCalendar extends utils.Adapter {
     }
 
     /**
-     * Creates the draft states of a device on its first request, fills in defaults and opens its dialog.
+     * Creates the draft states of a device if missing.
      *
      * @param device vis-2 browser instance ID
      */
-    private async openDraft(device: string): Promise<void> {
+    private async createDraft(device: string): Promise<void> {
         const dot = device.indexOf('.');
         if (dot > 0) {
             // The dot of the instance ID adds a level, and nested IDs need their parents.
@@ -140,20 +172,79 @@ class GoogleCalendar extends utils.Adapter {
         }
         await this.setObjectNotExistsAsync(`draft.${device}`, {
             type: 'channel',
-            common: { name: `New entry of vis browser ${device}` },
+            common: { name: `Form of vis browser ${device}` },
             native: {},
         });
         for (const [field, common] of Object.entries(DRAFT_STATES)) {
             await this.setObjectNotExistsAsync(`draft.${device}.${field}`, { type: 'state', common, native: {} });
         }
+    }
+
+    /**
+     * Creates the draft states of a device on its first request, fills in defaults and opens its dialog.
+     *
+     * @param device vis-2 browser instance ID
+     */
+    private async openDraft(device: string): Promise<void> {
+        await this.createDraft(device);
         const current = (await this.getStateAsync(`draft.${device}.type`))?.val;
         const type: EntryType = ENTRY_TYPES.includes(current as EntryType) ? (current as EntryType) : 'reminder';
         await this.setField(device, 'type', type);
         for (const [key, value] of Object.entries(draftDefaults(new Date()))) {
             await this.setField(device, key, value);
         }
+        await this.setTarget(device, null);
         await this.setField(device, 'result', '');
         await this.setField(device, 'open', true);
+    }
+
+    /**
+     * Opens the dialog of a device filled with a tapped entry of a writable calendar.
+     * Known limit: before the first read after a start the adapter has no rows, so a tap opens nothing.
+     *
+     * @param request What the calendar widget wrote
+     */
+    private async openEdit(request: EditRequest): Promise<void> {
+        const google = this.google;
+        const row = this.rowsByCalendar.get(request.calendarId)?.find(r => r._IDID === request.eventId);
+        if (!google || !row || google.settings.writable[row._type]?.calendarId !== row._calId) {
+            return;
+        }
+        let birthDate = '';
+        if (row._type === 'birthday' && row._recurringEventId) {
+            try {
+                const master = await getEvent(google.http, await google.token(), row._calId, row._recurringEventId);
+                birthDate = master.start.date ?? '';
+            } catch (error) {
+                // Without the master the form would show this year's date and a save would move the series.
+                this.log.warn(`Reading a birthday series failed: ${describeError(error)}`);
+                return;
+            }
+        }
+        if (this.stopping) {
+            return;
+        }
+        await this.createDraft(request.device);
+        for (const [key, value] of Object.entries(draftFromRow(row, new Date(), birthDate))) {
+            await this.setField(request.device, key, value);
+        }
+        await this.setTarget(request.device, targetOf(row));
+        await this.setField(request.device, 'result', '');
+        await this.setField(request.device, 'open', true);
+    }
+
+    /**
+     * Stores the edited entry of a device; null means a new entry.
+     *
+     * @param device Device ID
+     * @param target Edited entry, or null
+     */
+    private async setTarget(device: string, target: Target | null): Promise<void> {
+        if (this.stopping) {
+            return;
+        }
+        await this.setStateAsync(`draft.${device}.target`, target ? JSON.stringify(target) : '', true);
+        await this.publishView(device, { editing: target !== null, confirmDelete: false });
     }
 
     /**
@@ -180,7 +271,11 @@ class GoogleCalendar extends utils.Adapter {
      * @param patch Changed fields
      */
     private async publishView(device: string, patch: Partial<DeviceView>): Promise<void> {
-        this.views[device] = { ...{ type: '', allDay: false, result: '' }, ...this.views[device], ...patch };
+        this.views[device] = {
+            ...{ type: '', allDay: false, result: '', editing: false, confirmDelete: false },
+            ...this.views[device],
+            ...patch,
+        };
         if (!this.stopping) {
             await this.setStateChangedAsync('draft.view', JSON.stringify(this.views), true);
         }
@@ -232,19 +327,100 @@ class GoogleCalendar extends utils.Adapter {
                 await this.setField(device, 'result', 'Für diesen Typ ist kein beschreibbarer Kalender eingerichtet.');
                 return;
             }
-            await insertEvent(google.http, await google.token(), calendar.calendarId, result.body);
+            const target = parseTarget((await this.getStateAsync(`draft.${device}.target`))?.val);
+            const token = await google.token();
+            if (target && target.type === result.type) {
+                try {
+                    await patchEvent(google.http, token, target.calendarId, writeId(target), patchBody(result.body));
+                } catch (error) {
+                    if (!this.stopping) {
+                        this.log.warn(`Changing an entry failed: ${describeError(error)}`);
+                        await this.setField(device, 'result', changeErrorText(error));
+                    }
+                    return;
+                }
+                this.log.info(`Changed an entry of type ${result.type} in calendar "${calendar.name}"`);
+            } else {
+                const newId = await insertEvent(google.http, token, calendar.calendarId, result.body);
+                if (target) {
+                    try {
+                        await deleteEvent(google.http, token, target.calendarId, writeId(target));
+                    } catch (error) {
+                        if (!this.stopping) {
+                            this.log.warn(`Deleting the old entry after a type change failed: ${describeError(error)}`);
+                            await this.setTarget(device, {
+                                calendarId: calendar.calendarId,
+                                eventId: newId,
+                                type: result.type,
+                                seriesId: '',
+                            });
+                            await this.setField(device, 'result', DUPLICATE_TEXT);
+                            this.loop?.trigger();
+                        }
+                        return;
+                    }
+                    this.log.info(
+                        `Moved an entry from type ${target.type} to type ${result.type} in calendar "${calendar.name}"`,
+                    );
+                } else {
+                    this.log.info(`Created an entry of type ${result.type} in calendar "${calendar.name}"`);
+                }
+            }
             if (this.stopping) {
                 return;
             }
-            this.log.info(`Created an entry of type ${result.type} in calendar "${calendar.name}"`);
             await this.setField(device, 'result', 'ok');
             await this.setField(device, 'text', '');
+            await this.setTarget(device, null);
             await this.setField(device, 'open', false);
             this.loop?.trigger();
         } catch (error) {
             if (!this.stopping) {
                 this.log.warn(`Creating an entry failed: ${describeError(error)}`);
                 await this.setField(device, 'result', saveErrorText(error));
+            }
+        } finally {
+            this.saving.delete(device);
+        }
+    }
+
+    /**
+     * Deletes the edited entry of a device on the second press; the first press only asks.
+     *
+     * @param device Device ID
+     */
+    private async remove(device: string): Promise<void> {
+        const google = this.google;
+        const target = parseTarget((await this.getStateAsync(`draft.${device}.target`))?.val);
+        if (!google || !target) {
+            return;
+        }
+        if (!this.views[device].confirmDelete) {
+            await this.publishView(device, { confirmDelete: true });
+            return;
+        }
+        if (this.saving.has(device)) {
+            await this.setField(device, 'result', 'Speichern läuft noch …');
+            return;
+        }
+        this.saving.add(device);
+        try {
+            await deleteEvent(google.http, await google.token(), target.calendarId, writeId(target));
+            if (this.stopping) {
+                return;
+            }
+            const name = google.settings.calendars.find(c => c.calendarId === target.calendarId)?.name ?? '';
+            this.log.info(`Deleted an entry of type ${target.type} in calendar "${name}"`);
+            await this.setField(device, 'result', 'ok');
+            await this.setField(device, 'text', '');
+            await this.setTarget(device, null);
+            await this.setField(device, 'open', false);
+            this.loop?.trigger();
+        } catch (error) {
+            if (!this.stopping) {
+                this.log.warn(`Deleting an entry failed: ${describeError(error)}`);
+                await this.publishView(device, { confirmDelete: false });
+                await this.setField(device, 'result', deleteErrorText(error));
             }
         } finally {
             this.saving.delete(device);

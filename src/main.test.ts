@@ -1,7 +1,8 @@
 import { expect } from 'chai';
 import { createRequire } from 'node:module';
-import type { Settings } from './lib/config';
+import type { CalendarConfig, Settings } from './lib/config';
 import type { Http } from './lib/http';
+import type { Row } from './lib/rows';
 import type { TokenSource } from './lib/auth';
 
 /** Stand-in for the adapter-core base class: records state writes and runs a hook before each one. */
@@ -82,6 +83,7 @@ class FakeAdapter {
 interface Internals {
     google: { settings: Settings; http: Http; token: TokenSource } | undefined;
     cycle(): Promise<number>;
+    rowsByCalendar: Map<string, Row[]>;
     loop: { stop: () => void; trigger: () => void } | undefined;
     onStateChange(id: string, state: { val: unknown; ack: boolean } | null | undefined): Promise<void>;
 }
@@ -124,44 +126,77 @@ const settings: Settings = {
     },
 };
 
+interface Call {
+    method: string;
+    url: string;
+    body?: string;
+}
+
 /**
  * Builds an adapter with a fake Google transport.
  *
- * @param options insertStatus: status of the POST answer; holdInsert: keep the POST pending until releaseInsert()
+ * @param options Answers of the fake transport and the settings to use
  * @param options.insertStatus Status of the POST answer
  * @param options.holdInsert Keep the POST pending until releaseInsert()
+ * @param options.patchStatus Status of a PATCH answer
+ * @param options.deleteStatus Status of a DELETE answer
+ * @param options.master Body of a GET of one event; none answers 404
+ * @param options.settings Settings instead of the default ones
  */
-function startCycle(options: { insertStatus?: number; holdInsert?: boolean } = {}): {
+function startCycle(
+    options: {
+        insertStatus?: number;
+        holdInsert?: boolean;
+        patchStatus?: number;
+        deleteStatus?: number;
+        master?: unknown;
+        settings?: Settings;
+    } = {},
+): {
     adapter: FakeAdapter;
     internals: Internals;
     posts: { url: string }[];
+    calls: Call[];
     triggered: () => number;
     releaseInsert: () => void;
 } {
     const adapter = createAdapter({});
     const internals = adapter as unknown as Internals;
     const posts: { url: string }[] = [];
+    const calls: Call[] = [];
     let count = 0;
     let release: () => void = () => undefined;
     const held = new Promise<void>(resolve => {
         release = resolve;
     });
     const http: Http = (url, request) => {
-        if (request?.method !== 'POST') {
-            return Promise.resolve({ status: 200, body: { items: [] } });
+        const method = request?.method ?? 'GET';
+        calls.push({ method, url, body: request?.body });
+        if (method === 'GET') {
+            return Promise.resolve(
+                new URL(url).pathname.includes('/events/')
+                    ? { status: options.master ? 200 : 404, body: options.master ?? null }
+                    : { status: 200, body: { items: [] } },
+            );
+        }
+        if (method === 'PATCH') {
+            return Promise.resolve({ status: options.patchStatus ?? 200, body: { id: 'patched' } });
+        }
+        if (method === 'DELETE') {
+            return Promise.resolve({ status: options.deleteStatus ?? 204, body: null });
         }
         posts.push({ url });
         const answer = { status: options.insertStatus ?? 200, body: { id: 'new1' } };
         return options.holdInsert ? held.then(() => answer) : Promise.resolve(answer);
     };
-    internals.google = { settings, http, token: () => Promise.resolve('token') };
+    internals.google = { settings: options.settings ?? settings, http, token: () => Promise.resolve('token') };
     internals.loop = {
         stop: () => undefined,
         trigger: () => {
             count++;
         },
     };
-    return { adapter, internals, posts, triggered: () => count, releaseInsert: release };
+    return { adapter, internals, posts, calls, triggered: () => count, releaseInsert: release };
 }
 
 function unload(adapter: FakeAdapter): void {
@@ -276,7 +311,11 @@ describe('draft per device', () => {
             expect(adapter.states.get(`draft.${A}.startTime`)).to.match(/^\d{2}:00$/);
             expect(adapter.states.get(`draft.${A}.result`)).to.equal('');
             expect(adapter.states.get(`draft.${A}.open`)).to.equal(true);
-            expect(views(adapter)).to.deep.equal({ [A]: { type: 'reminder', allDay: false, result: '' } });
+            expect(views(adapter)).to.deep.equal({
+                [A]: { type: 'reminder', allDay: false, result: '', editing: false, confirmDelete: false },
+            });
+            expect(adapter.states.get(`draft.${A}.target`)).to.equal('');
+            expect(adapter.objects.get(`draft.${A}.delete`)?.common.role).to.equal('button');
         });
 
         it('keeps the type the device chose last time', async () => {
@@ -440,7 +479,13 @@ describe('draft per device', () => {
             const { adapter, internals } = await opened([A]);
             await internals.onStateChange(id(A, 'type'), user('appointment'));
             await internals.onStateChange(id(A, 'allDay'), user(true));
-            expect(views(adapter)[A]).to.deep.equal({ type: 'appointment', allDay: true, result: '' });
+            expect(views(adapter)[A]).to.deep.equal({
+                type: 'appointment',
+                allDay: true,
+                result: '',
+                editing: false,
+                confirmDelete: false,
+            });
         });
 
         it('ignores a field change of a device that never opened the dialog', async () => {
@@ -531,6 +576,328 @@ describe('draft per device', () => {
             unload(adapter);
             await internals.onStateChange(id(A, 'startDate'), user('2026-11-14'));
             expect(adapter.writes).to.deep.equal([]);
+        });
+    });
+
+    describe('edit and delete', () => {
+        const EDIT = 'google-calendar.0.draft.edit';
+        const local = (y: number, m: number, d: number, h = 0, min = 0): string =>
+            new Date(y, m - 1, d, h, min).toISOString();
+        const calendar = (name: string, type: CalendarConfig['type'], writable = true): CalendarConfig => ({
+            name,
+            calendarId: `${name.toLowerCase()}@example.test`,
+            type,
+            color: '#123456',
+            writable,
+        });
+        const termine = calendar('Termine', 'appointment');
+        const erinnerungen = calendar('Erinnerungen', 'reminder');
+        const geburtstage = calendar('Geburtstage', 'birthday');
+        const privat = calendar('Privat', 'appointment', false);
+        const all: Settings = {
+            ...settings,
+            calendars: [termine, erinnerungen, geburtstage, privat],
+            writable: { appointment: termine, reminder: erinnerungen, birthday: geburtstage },
+        };
+        function row(cal: CalendarConfig, patch: Partial<Row>): Row {
+            return {
+                date: '',
+                event: 'Zahnarzt',
+                _date: local(2026, 11, 19, 18, 0),
+                _end: local(2026, 11, 19, 19, 0),
+                _allDay: false,
+                _calName: cal.name,
+                _calColor: cal.color,
+                _class: `ical_${cal.name}`,
+                _IDID: 'ev1',
+                _calId: cal.calendarId,
+                _recurringEventId: '',
+                _type: cal.type,
+                ...patch,
+            };
+        }
+        const appointment = row(termine, {});
+        const birthday = row(geburtstage, {
+            event: 'Oma',
+            _IDID: 's1_20261115',
+            _recurringEventId: 's1',
+            _allDay: true,
+            _date: local(2026, 11, 15),
+            _end: local(2026, 11, 16),
+        });
+        const foreign = row(privat, { _IDID: 'p1' });
+        const tap = (device: string, r: Row): { val: unknown; ack: boolean } =>
+            user(JSON.stringify({ instance: device, event: r }));
+        /**
+         * Adapter with all three writable calendars and the given rows read.
+         *
+         * @param rows Rows of the last read
+         * @param options Options of the fake Google transport
+         */
+        function withRows(rows: Row[], options: Parameters<typeof startCycle>[0] = {}): ReturnType<typeof startCycle> {
+            const setup = startCycle({ settings: all, ...options });
+            for (const r of rows) {
+                setup.internals.rowsByCalendar.set(r._calId, [
+                    ...(setup.internals.rowsByCalendar.get(r._calId) ?? []),
+                    r,
+                ]);
+            }
+            return setup;
+        }
+        /**
+         * Starts an adapter and lets device A tap the row.
+         *
+         * @param r Tapped row
+         * @param options Options of the fake Google transport
+         */
+        async function editing(
+            r: Row,
+            options: Parameters<typeof startCycle>[0] = {},
+        ): Promise<ReturnType<typeof startCycle>> {
+            const setup = withRows([appointment, birthday, foreign], options);
+            await setup.internals.onStateChange(EDIT, tap(A, r));
+            return setup;
+        }
+        const target = (adapter: FakeAdapter): unknown =>
+            JSON.parse((adapter.states.get(`draft.${A}.target`) as string) || 'null');
+
+        describe('open', () => {
+            it('creates the states, fills the draft from the own row and opens the dialog', async () => {
+                const { adapter } = await editing({ ...appointment, event: 'from the payload, ignored' });
+                expect(adapter.objects.get(`draft.${A}.target`)?.common.write).to.equal(false);
+                expect(adapter.states.get(`draft.${A}.text`)).to.equal('Zahnarzt');
+                expect(adapter.states.get(`draft.${A}.type`)).to.equal('appointment');
+                expect(adapter.states.get(`draft.${A}.startDate`)).to.equal('2026-11-19');
+                expect(adapter.states.get(`draft.${A}.startTime`)).to.equal('18:00');
+                expect(adapter.states.get(`draft.${A}.endTime`)).to.equal('19:00');
+                expect(adapter.states.get(`draft.${A}.allDay`)).to.equal(false);
+                expect(adapter.states.get(`draft.${A}.result`)).to.equal('');
+                expect(adapter.states.get(`draft.${A}.open`)).to.equal(true);
+                expect(target(adapter)).to.deep.equal({
+                    calendarId: termine.calendarId,
+                    eventId: 'ev1',
+                    type: 'appointment',
+                    seriesId: '',
+                });
+                expect(views(adapter)[A]).to.deep.equal({
+                    type: 'appointment',
+                    allDay: false,
+                    result: '',
+                    editing: true,
+                    confirmDelete: false,
+                });
+                expect(adapter.states.get('draft.edit')).to.equal('');
+            });
+
+            it('takes the birth date from the series master', async () => {
+                const { adapter, calls } = await editing(birthday, {
+                    master: { id: 's1', summary: 'Oma', start: { date: '1950-11-15' }, end: { date: '1950-11-16' } },
+                });
+                expect(calls.some(c => c.method === 'GET' && c.url.endsWith('/events/s1'))).to.equal(true);
+                expect(adapter.states.get(`draft.${A}.startDate`)).to.equal('1950-11-15');
+                expect(adapter.states.get(`draft.${A}.open`)).to.equal(true);
+            });
+
+            it('opens nothing when the series master cannot be read, so a save cannot move the birthday', async () => {
+                const { adapter } = await editing(birthday);
+                expect(adapter.states.get(`draft.${A}.open`)).to.not.equal(true);
+                expect(adapter.states.get('draft.edit')).to.equal('');
+            });
+
+            it('opens nothing for a read-only calendar, an unknown row or a broken request', async () => {
+                const setup = withRows([appointment, foreign]);
+                const requests = [
+                    tap(A, foreign),
+                    tap(A, { ...appointment, _IDID: 'unknown' }),
+                    tap(A, { ...appointment, _calId: 'other@example.test' }),
+                    tap('ABCDEF12', appointment),
+                    user('not json'),
+                    user(''),
+                    user(null),
+                ];
+                for (const request of requests) {
+                    await setup.internals.onStateChange(EDIT, request);
+                }
+                expect(setup.adapter.objects.size).to.equal(0);
+                expect(setup.adapter.states.get('draft.edit')).to.equal('');
+                expect(setup.calls.filter(c => c.method !== 'GET')).to.deep.equal([]);
+            });
+
+            it('ignores an acknowledged tap', async () => {
+                const setup = withRows([appointment]);
+                await setup.internals.onStateChange(EDIT, {
+                    val: JSON.stringify({ instance: A, event: appointment }),
+                    ack: true,
+                });
+                expect(setup.adapter.objects.size).to.equal(0);
+            });
+
+            it('forgets the target when the same browser asks for a new entry', async () => {
+                const { adapter, internals } = await editing(appointment);
+                await internals.onStateChange(REQUEST, user(A));
+                expect(adapter.states.get(`draft.${A}.target`)).to.equal('');
+                expect(views(adapter)[A]).to.include({ editing: false, confirmDelete: false });
+            });
+        });
+
+        describe('save', () => {
+            it('patches title and times of the entry and closes the dialog', async () => {
+                const { adapter, internals, calls, posts, triggered } = await editing(appointment);
+                fill(adapter, A, { text: 'Zahnarzt neu', startTime: '17:00' });
+                await internals.onStateChange(id(A, 'save'), user(true));
+                const patch = calls.find(c => c.method === 'PATCH');
+                expect(patch?.url).to.contain('/calendars/termine%40example.test/events/ev1');
+                expect(JSON.parse(patch?.body ?? '')).to.deep.equal({
+                    summary: 'Zahnarzt neu',
+                    start: { dateTime: new Date(2026, 10, 19, 17, 0).toISOString(), date: null },
+                    end: { dateTime: new Date(2026, 10, 19, 19, 0).toISOString(), date: null },
+                });
+                expect(posts).to.deep.equal([]);
+                expect(adapter.states.get(`draft.${A}.result`)).to.equal('ok');
+                expect(adapter.states.get(`draft.${A}.open`)).to.equal(false);
+                expect(adapter.states.get(`draft.${A}.target`)).to.equal('');
+                expect(views(adapter)[A].editing).to.equal(false);
+                expect(triggered()).to.equal(1);
+                expect(adapter.infos.join(' ')).to.not.contain('Zahnarzt');
+            });
+
+            it('patches a birthday as a series', async () => {
+                const { adapter, internals, calls } = await editing(birthday, {
+                    master: { id: 's1', summary: 'Oma', start: { date: '1950-11-15' }, end: { date: '1950-11-16' } },
+                });
+                await internals.onStateChange(id(A, 'save'), user(true));
+                expect(calls.find(c => c.method === 'PATCH')?.url).to.match(/\/events\/s1$/);
+                expect(adapter.states.get(`draft.${A}.result`)).to.equal('ok');
+            });
+
+            it('validates like a new entry and calls nothing on invalid input', async () => {
+                const { adapter, internals, calls } = await editing(appointment);
+                fill(adapter, A, { endTime: '17:00' });
+                await internals.onStateChange(id(A, 'save'), user(true));
+                expect(calls.filter(c => c.method === 'PATCH')).to.deep.equal([]);
+                expect(adapter.states.get(`draft.${A}.result`)).to.equal('Bitte ein Ende nach dem Beginn wählen.');
+                expect(adapter.states.get(`draft.${A}.open`)).to.equal(true);
+            });
+
+            it('says an entry is gone on 404 and keeps the dialog open', async () => {
+                const { adapter, internals } = await editing(appointment, { patchStatus: 404 });
+                await internals.onStateChange(id(A, 'save'), user(true));
+                expect(adapter.states.get(`draft.${A}.result`)).to.equal('Diesen Eintrag gibt es nicht mehr.');
+                expect(adapter.states.get(`draft.${A}.open`)).to.equal(true);
+            });
+
+            it('moves a changed type: inserts in the new calendar, then deletes the old entry', async () => {
+                const { adapter, internals, calls, posts } = await editing(appointment);
+                fill(adapter, A, { type: 'reminder' });
+                await internals.onStateChange(id(A, 'save'), user(true));
+                expect(posts[0].url).to.contain('/calendars/erinnerungen%40example.test/events');
+                const removed = calls.find(c => c.method === 'DELETE');
+                expect(removed?.url).to.contain('/calendars/termine%40example.test/events/ev1');
+                expect(calls.findIndex(c => c.method === 'POST')).to.be.below(
+                    calls.findIndex(c => c.method === 'DELETE'),
+                );
+                expect(adapter.states.get(`draft.${A}.result`)).to.equal('ok');
+                expect(adapter.states.get(`draft.${A}.open`)).to.equal(false);
+            });
+
+            it('keeps editing the new entry when the old one cannot be deleted', async () => {
+                const { adapter, internals, triggered } = await editing(appointment, { deleteStatus: 500 });
+                fill(adapter, A, { type: 'reminder' });
+                await internals.onStateChange(id(A, 'save'), user(true));
+                expect(adapter.states.get(`draft.${A}.result`)).to.equal(
+                    'Neuer Eintrag angelegt, der alte konnte nicht gelöscht werden.',
+                );
+                expect(adapter.states.get(`draft.${A}.open`)).to.equal(true);
+                expect(target(adapter)).to.deep.equal({
+                    calendarId: erinnerungen.calendarId,
+                    eventId: 'new1',
+                    type: 'reminder',
+                    seriesId: '',
+                });
+                expect(triggered()).to.equal(1);
+            });
+
+            it('changes nothing when the insert of a type change fails', async () => {
+                const { adapter, internals, calls } = await editing(appointment, { insertStatus: 403 });
+                fill(adapter, A, { type: 'reminder' });
+                await internals.onStateChange(id(A, 'save'), user(true));
+                expect(calls.filter(c => c.method === 'DELETE')).to.deep.equal([]);
+                expect(adapter.states.get(`draft.${A}.result`)).to.contain('Freigabe');
+                expect(target(adapter)).to.include({ eventId: 'ev1' });
+            });
+        });
+
+        describe('delete', () => {
+            it('asks on the first press and deletes on the second', async () => {
+                const { adapter, internals, calls, triggered } = await editing(appointment);
+                await internals.onStateChange(id(A, 'delete'), user(true));
+                expect(views(adapter)[A].confirmDelete).to.equal(true);
+                expect(calls.filter(c => c.method === 'DELETE')).to.deep.equal([]);
+                await internals.onStateChange(id(A, 'delete'), user(true));
+                expect(calls.filter(c => c.method === 'DELETE').map(c => new URL(c.url).pathname)).to.deep.equal([
+                    '/calendar/v3/calendars/termine%40example.test/events/ev1',
+                ]);
+                expect(adapter.states.get(`draft.${A}.open`)).to.equal(false);
+                expect(adapter.states.get(`draft.${A}.target`)).to.equal('');
+                expect(views(adapter)[A]).to.include({ editing: false, confirmDelete: false });
+                expect(triggered()).to.equal(1);
+                expect(adapter.infos.join(' ')).to.not.contain('Zahnarzt');
+            });
+
+            it('deletes a birthday series as a whole', async () => {
+                const { internals, calls } = await editing(birthday, {
+                    master: { id: 's1', summary: 'Oma', start: { date: '1950-11-15' }, end: { date: '1950-11-16' } },
+                });
+                await internals.onStateChange(id(A, 'delete'), user(true));
+                await internals.onStateChange(id(A, 'delete'), user(true));
+                expect(calls.find(c => c.method === 'DELETE')?.url).to.match(/\/events\/s1$/);
+            });
+
+            it('asks again after any other field change', async () => {
+                const { adapter, internals, calls } = await editing(appointment);
+                await internals.onStateChange(id(A, 'delete'), user(true));
+                await internals.onStateChange(id(A, 'text'), user('anders'));
+                expect(views(adapter)[A].confirmDelete).to.equal(false);
+                await internals.onStateChange(id(A, 'delete'), user(true));
+                expect(calls.filter(c => c.method === 'DELETE')).to.deep.equal([]);
+            });
+
+            it('asks again after the dialog was opened anew', async () => {
+                const { adapter, internals } = await editing(appointment);
+                await internals.onStateChange(id(A, 'delete'), user(true));
+                await internals.onStateChange(EDIT, tap(A, appointment));
+                expect(views(adapter)[A].confirmDelete).to.equal(false);
+            });
+
+            it('reports a failed delete and asks again next time', async () => {
+                const { adapter, internals } = await editing(appointment, { deleteStatus: 403 });
+                await internals.onStateChange(id(A, 'delete'), user(true));
+                await internals.onStateChange(id(A, 'delete'), user(true));
+                expect(adapter.states.get(`draft.${A}.result`)).to.contain('Freigabe');
+                expect(adapter.states.get(`draft.${A}.open`)).to.equal(true);
+                expect(views(adapter)[A].confirmDelete).to.equal(false);
+            });
+
+            it('ignores delete without a target, false values and acknowledged presses', async () => {
+                const { adapter, internals, calls } = await opened([A, B]);
+                await internals.onStateChange(id(A, 'delete'), user(true));
+                await internals.onStateChange(id(A, 'delete'), user(true));
+                await internals.onStateChange(id(A, 'delete'), user(false));
+                await internals.onStateChange(id(A, 'delete'), { val: true, ack: true });
+                expect(calls.filter(c => c.method === 'DELETE')).to.deep.equal([]);
+                expect(views(adapter)[A].confirmDelete).to.equal(false);
+            });
+
+            it('deletes only the entry of the pressing browser', async () => {
+                const setup = withRows([appointment, row(termine, { _IDID: 'ev2' })]);
+                await setup.internals.onStateChange(EDIT, tap(A, appointment));
+                await setup.internals.onStateChange(EDIT, tap(B, row(termine, { _IDID: 'ev2' })));
+                await setup.internals.onStateChange(id(B, 'delete'), user(true));
+                await setup.internals.onStateChange(id(B, 'delete'), user(true));
+                expect(setup.calls.filter(c => c.method === 'DELETE').map(c => c.url)).to.have.length(1);
+                expect(setup.calls.find(c => c.method === 'DELETE')?.url).to.match(/\/events\/ev2$/);
+                expect(setup.adapter.states.get(`draft.${A}.open`)).to.equal(true);
+            });
         });
     });
 

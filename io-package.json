@@ -156,6 +156,19 @@
             "native": {}
         },
         {
+            "_id": "draft.edit",
+            "type": "state",
+            "common": {
+                "role": "json",
+                "name": "Edit an entry (the calendar widget writes the tapped row with the browser instance)",
+                "type": "string",
+                "read": true,
+                "write": true,
+                "def": ""
+            },
+            "native": {}
+        },
+        {
             "_id": "draft.view",
             "type": "state",
             "common": {
