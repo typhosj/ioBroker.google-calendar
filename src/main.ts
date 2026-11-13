@@ -226,6 +226,12 @@ class GoogleCalendar extends utils.Adapter {
                 this.log.warn(`Reading a birthday series failed: ${describeError(error)}`);
                 return;
             }
+            if (!birthDate) {
+                this.log.warn(
+                    `Not opening a birthday series without an all-day start in calendar "${google.settings.writable.birthday?.name ?? ''}"`,
+                );
+                return;
+            }
         }
         if (this.stopping || this.saving.has(request.device)) {
             return;

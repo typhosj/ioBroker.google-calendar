@@ -243,6 +243,22 @@ describe('draftFromRow', () => {
         });
         expect(draftFromRow(birthday, NOW).startDate).to.equal('2026-11-15');
     });
+
+    it('shows the birth date also for a timed birthday, with suggested times', () => {
+        const timed = row({ _type: 'birthday', event: 'Oma', _date: local(2026, 11, 15, 9, 0), _end: local(2026, 11, 15, 10, 0) });
+        expect(draftFromRow(timed, NOW, '1950-11-15')).to.deep.equal({
+            type: 'birthday',
+            text: 'Oma',
+            startDate: '1950-11-15',
+            startTime: '15:00',
+            endDate: '1950-11-15',
+            endTime: '16:00',
+            allDay: false,
+        });
+        expect(draftFromRow(timed, NOW)).to.include({ startDate: '2026-11-15', endDate: '2026-11-15' });
+        const lateNight = row({ _type: 'birthday', _date: local(2026, 11, 15, 23, 30), _end: local(2026, 11, 16, 0, 30) });
+        expect(draftFromRow(lateNight, NOW)).to.include({ startDate: '2026-11-15', endDate: '2026-11-15' });
+    });
 });
 
 describe('patchBody', () => {

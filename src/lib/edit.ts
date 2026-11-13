@@ -135,7 +135,8 @@ export const targetOf = (row: Row): Target => ({
 export const writeId = (target: Target): string => (target.type === 'birthday' && target.seriesId) || target.eventId;
 
 /**
- * Draft values for an entry. An all-day entry gets suggested times in case all-day is switched off.
+ * Draft values for an entry. A birthday and an all-day entry get suggested times in case a time is
+ * entered; a birthday always shows a date only, the birth date when given.
  *
  * @param row Row of the adapter's own table.
  * @param now Current time, for the suggested times.
@@ -145,17 +146,8 @@ export function draftFromRow(row: Row, now: Date, birthDate = ''): DraftValues {
     const start = new Date(row._date);
     const end = new Date(row._end);
     const base = { type: row._type, text: row.event };
-    if (!row._allDay) {
-        return {
-            ...base,
-            startDate: isoDate(start),
-            startTime: timeText(start),
-            endDate: isoDate(end),
-            endTime: timeText(end),
-            allDay: false,
-        };
-    }
     const suggested = draftDefaults(now);
+    // A birthday is a day, also when Google holds it with a time.
     if (row._type === 'birthday') {
         const day = birthDate || isoDate(start);
         return {
@@ -164,6 +156,16 @@ export function draftFromRow(row: Row, now: Date, birthDate = ''): DraftValues {
             startTime: suggested.startTime,
             endDate: day,
             endTime: suggested.endTime,
+            allDay: false,
+        };
+    }
+    if (!row._allDay) {
+        return {
+            ...base,
+            startDate: isoDate(start),
+            startTime: timeText(start),
+            endDate: isoDate(end),
+            endTime: timeText(end),
             allDay: false,
         };
     }

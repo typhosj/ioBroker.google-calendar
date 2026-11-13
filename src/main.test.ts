@@ -720,6 +720,29 @@ describe('draft per device', () => {
                 expect(adapter.states.get('draft.edit')).to.equal('');
             });
 
+            it('opens nothing when the series master has no all-day start, so the birth year is not lost', async () => {
+                for (const start of [{ dateTime: '1950-11-15T10:00:00Z' }, { date: '' }]) {
+                    const { adapter } = await editing(birthday, {
+                        master: { id: 's1', summary: 'Oma', start, end: { dateTime: '1950-11-15T11:00:00Z' } },
+                    });
+                    expect(adapter.objects.size, JSON.stringify(start)).to.equal(0);
+                    expect(adapter.states.get(`draft.${A}.open`)).to.equal(undefined);
+                    expect(adapter.states.get('draft.edit')).to.equal('');
+                }
+            });
+
+            it('shows the birth date of the master for a timed instance of a birthday series', async () => {
+                const timed = { ...birthday, _allDay: false, _date: local(2026, 11, 15, 9), _end: local(2026, 11, 15, 10) };
+                const { adapter, internals } = withRows([timed], {
+                    master: { id: 's1', summary: 'Oma', start: { date: '1950-11-15' }, end: { date: '1950-11-16' } },
+                });
+                await internals.onStateChange(EDIT, tap(A, timed));
+                expect(adapter.states.get(`draft.${A}.startDate`)).to.equal('1950-11-15');
+                expect(adapter.states.get(`draft.${A}.endDate`)).to.equal('1950-11-15');
+                expect(adapter.states.get(`draft.${A}.allDay`)).to.equal(false);
+                expect(adapter.states.get(`draft.${A}.open`)).to.equal(true);
+            });
+
             it('opens nothing for a read-only calendar, an unknown row or a broken request', async () => {
                 const setup = withRows([appointment, foreign]);
                 const requests = [
