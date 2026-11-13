@@ -169,12 +169,24 @@ export function draftFromRow(row: Row, now: Date, birthDate = ''): DraftValues {
         };
     }
     if (!row._allDay) {
+        // A reminder ends where it starts; its hidden end becomes one hour later, like on a new
+        // entry, so switching the type to appointment does not fail on the end.
+        const until =
+            end > start
+                ? end
+                : new Date(
+                      start.getFullYear(),
+                      start.getMonth(),
+                      start.getDate(),
+                      start.getHours() + 1,
+                      start.getMinutes(),
+                  );
         return {
             ...base,
             startDate: isoDate(start),
             startTime: timeText(start),
-            endDate: isoDate(end),
-            endTime: timeText(end),
+            endDate: isoDate(until),
+            endTime: timeText(until),
             allDay: false,
         };
     }

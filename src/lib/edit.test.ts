@@ -14,6 +14,7 @@ import {
     targetOf,
     writeId,
 } from './edit';
+import { buildEvent } from './draft';
 import { GoogleError } from './http';
 import type { Row } from './rows';
 
@@ -196,7 +197,7 @@ describe('draftFromRow', () => {
         expect([multi.endDate, multi.endTime]).to.deep.equal(['2026-11-21', '12:00']);
     });
 
-    it('fills a reminder with end = start', () => {
+    it('suggests an end one hour after a reminder, so switching it to an appointment is valid', () => {
         const reminder = draftFromRow(
             row({ _type: 'reminder', _date: local(2026, 11, 20, 8, 0), _end: local(2026, 11, 20, 8, 0) }),
             NOW,
@@ -205,8 +206,20 @@ describe('draftFromRow', () => {
             '2026-11-20',
             '08:00',
             '2026-11-20',
-            '08:00',
+            '09:00',
         ]);
+        const late = draftFromRow(
+            row({ _type: 'reminder', _date: local(2026, 12, 31, 23, 30), _end: local(2026, 12, 31, 23, 30) }),
+            NOW,
+        );
+        expect([late.endDate, late.endTime]).to.deep.equal(['2027-01-01', '00:30']);
+        const switched = buildEvent({ ...reminder, type: 'appointment' });
+        expect(switched.ok).to.equal(true);
+    });
+
+    it('suggests a new end for a timed appointment that ends before it starts', () => {
+        const broken = draftFromRow(row({ _date: local(2026, 11, 20, 8, 0), _end: local(2026, 11, 20, 7, 0) }), NOW);
+        expect([broken.endDate, broken.endTime]).to.deep.equal(['2026-11-20', '09:00']);
     });
 
     it('shows an all-day end inclusive and suggests times for switching all-day off', () => {
