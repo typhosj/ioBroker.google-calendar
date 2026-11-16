@@ -68,7 +68,7 @@ const fail = (error: string): DraftResult => ({ ok: false, error });
  * @param value Untrusted date text, expected as YYYY-MM-DD.
  * @param minYear Earliest accepted year.
  */
-function parseDate(value: unknown, minYear = 2000): Date | null {
+export function parseDate(value: unknown, minYear = 2000): Date | null {
     const match = typeof value === 'string' ? DATE.exec(value.trim()) : null;
     if (!match) {
         return null;
@@ -88,7 +88,7 @@ function parseDate(value: unknown, minYear = 2000): Date | null {
  * @param day Local calendar day.
  * @param value Untrusted time text, expected as HH:MM.
  */
-function atTime(day: Date, value: unknown): Date | null {
+export function atTime(day: Date, value: unknown): Date | null {
     const match = typeof value === 'string' ? TIME.exec(value.trim()) : null;
     return match
         ? new Date(day.getFullYear(), day.getMonth(), day.getDate(), Number(match[1]), Number(match[2]))
