@@ -31,6 +31,14 @@ import { deleteEvent, describeError, getEvent, insertEvent, listEvents, patchEve
 import { createHttp, type Http } from './lib/http';
 import { MAX_BACKOFF_MS, nextDelay, startLoop } from './lib/loop';
 import { sortRows, toRow, type Row } from './lib/rows';
+import {
+    buildSuggestions,
+    fillFromSuggestion,
+    findSuggestion,
+    SUGGEST_DAYS,
+    suggestionItems,
+    type Suggestion,
+} from './lib/suggestions';
 import { buildUpcoming } from './lib/upcoming';
 
 const DAY_MS = 86_400_000;
@@ -61,6 +69,8 @@ class GoogleCalendar extends utils.Adapter {
     private failures = 0;
     /** Last good rows per calendar ID; a calendar that fails keeps its previous rows. */
     private readonly rowsByCalendar = new Map<string, Row[]>();
+    /** Earlier titles of the last good read, for the fill on `text`. */
+    private suggestions: Suggestion[] = [];
     /** Problems already logged, so each one logs once until it recovers. */
     private readonly reported = new Set<string>();
 
@@ -149,7 +159,9 @@ class GoogleCalendar extends utils.Adapter {
                 field === 'type' ? { type: String(state.val) } : { allDay: state.val === true },
             );
         }
-        if (FOLLOWED_FIELDS.includes(field)) {
+        if (field === 'text') {
+            await this.fillFromTitle(device, state.val);
+        } else if (FOLLOWED_FIELDS.includes(field)) {
             await this.moveEnd(device);
         } else if (field === 'save' && state.val === true) {
             await this.save(device);
@@ -325,6 +337,26 @@ class GoogleCalendar extends utils.Adapter {
     }
 
     /**
+     * Fills type and times of a new entry from a known title, picked in the Autocomplete or typed exactly.
+     *
+     * @param device Device ID
+     * @param text Text the user wrote
+     */
+    private async fillFromTitle(device: string, text: unknown): Promise<void> {
+        const suggestion = findSuggestion(text, this.suggestions);
+        if (!suggestion || this.saving.has(device) || this.views[device].editing) {
+            return;
+        }
+        const draft = await this.readDraft(device);
+        if (draft.type === 'birthday') {
+            return;
+        }
+        for (const [key, value] of Object.entries(fillFromSuggestion(draft, suggestion))) {
+            await this.setField(device, key, value);
+        }
+    }
+
+    /**
      * Validates the draft of a device, creates the event and reports the outcome in its `result`.
      *
      * @param device Device ID
@@ -488,7 +520,11 @@ class GoogleCalendar extends utils.Adapter {
      */
     private async read(google: Google): Promise<boolean> {
         const now = Date.now();
-        const timeMin = new Date(now - google.settings.daysPast * DAY_MS);
+        const { daysPast, writable } = google.settings;
+        // Titles for suggestions come from the calendars new appointments and reminders are written to.
+        const sources = new Set(
+            [writable.appointment?.calendarId, writable.reminder?.calendarId].filter((id): id is string => !!id),
+        );
         const timeMax = new Date(now + google.settings.daysPreview * DAY_MS);
         let token: string;
         try {
@@ -502,6 +538,8 @@ class GoogleCalendar extends utils.Adapter {
         let anyOk = false;
         for (const calendar of google.settings.calendars) {
             try {
+                const days = sources.has(calendar.calendarId) ? Math.max(daysPast, SUGGEST_DAYS) : daysPast;
+                const timeMin = new Date(now - days * DAY_MS);
                 const events = await listEvents(google.http, token, calendar.calendarId, timeMin, timeMax);
                 this.rowsByCalendar.set(
                     calendar.calendarId,
@@ -521,7 +559,11 @@ class GoogleCalendar extends utils.Adapter {
         }
         await this.setConnection(anyOk);
         if (anyOk && !this.stopping) {
-            await this.setStateChangedAsync('table', JSON.stringify(this.rows()), true);
+            await this.setStateChangedAsync('table', JSON.stringify(this.rows(now)), true);
+            this.suggestions = buildSuggestions([...this.rowsByCalendar.values()].flat(), sources);
+            if (!this.stopping) {
+                await this.setStateChangedAsync('suggestions', JSON.stringify(suggestionItems(this.suggestions)), true);
+            }
         }
         return anyOk;
     }
@@ -531,11 +573,19 @@ class GoogleCalendar extends utils.Adapter {
         if (this.stopping || !this.rowsByCalendar.size) {
             return;
         }
-        await this.setStateChangedAsync('upcoming', JSON.stringify(buildUpcoming(this.rows(), new Date())), true);
+        const now = Date.now();
+        await this.setStateChangedAsync('upcoming', JSON.stringify(buildUpcoming(this.rows(now), new Date(now))), true);
     }
 
-    private rows(): Row[] {
-        return sortRows([...this.rowsByCalendar.values()].flat());
+    /**
+     * Rows for `table` and `upcoming`: the suggestion calendars are read further back, so rows that
+     * ended before `daysPast` are cut here, as Google's `timeMin` does for the other calendars.
+     *
+     * @param now Current time in ms
+     */
+    private rows(now: number): Row[] {
+        const from = now - (this.google?.settings.daysPast ?? 0) * DAY_MS;
+        return sortRows([...this.rowsByCalendar.values()].flat().filter(row => Date.parse(row._end) > from));
     }
 
     private async setConnection(connected: boolean): Promise<void> {

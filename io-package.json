@@ -135,6 +135,19 @@
             "native": {}
         },
         {
+            "_id": "suggestions",
+            "type": "state",
+            "common": {
+                "role": "json",
+                "name": "Earlier titles (Autocomplete widget JSON)",
+                "type": "string",
+                "read": true,
+                "write": false,
+                "def": "[]"
+            },
+            "native": {}
+        },
+        {
             "_id": "draft",
             "type": "channel",
             "common": {

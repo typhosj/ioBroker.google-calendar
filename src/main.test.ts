@@ -86,6 +86,8 @@ interface Internals {
     rowsByCalendar: Map<string, Row[]>;
     loop: { stop: () => void; trigger: () => void } | undefined;
     onStateChange(id: string, state: { val: unknown; ack: boolean } | null | undefined): Promise<void>;
+    views: Record<string, { editing: boolean }>;
+    saving: Set<string>;
 }
 
 // Load main.ts against the stand-in instead of the real adapter-core, then restore the module cache.
@@ -143,6 +145,8 @@ interface Call {
  * @param options.deleteStatus Status of a DELETE answer
  * @param options.master Body of a GET of one event; none answers 404
  * @param options.settings Settings instead of the default ones
+ * @param options.events Items of `events.list` per calendar ID; none answers an empty list
+ * @param options.listStatus Status of every `events.list` answer
  */
 function startCycle(
     options: {
@@ -153,6 +157,8 @@ function startCycle(
         holdDelete?: boolean;
         master?: unknown;
         settings?: Settings;
+        events?: Record<string, unknown[]>;
+        listStatus?: number;
     } = {},
 ): {
     adapter: FakeAdapter;
@@ -180,11 +186,15 @@ function startCycle(
         const method = request?.method ?? 'GET';
         calls.push({ method, url, body: request?.body });
         if (method === 'GET') {
-            return Promise.resolve(
-                new URL(url).pathname.includes('/events/')
-                    ? { status: options.master ? 200 : 404, body: options.master ?? null }
-                    : { status: 200, body: { items: [] } },
-            );
+            const path = new URL(url).pathname;
+            if (path.includes('/events/')) {
+                return Promise.resolve({ status: options.master ? 200 : 404, body: options.master ?? null });
+            }
+            const calendarId = decodeURIComponent(path.split('/')[4]);
+            return Promise.resolve({
+                status: options.listStatus ?? 200,
+                body: { items: options.events?.[calendarId] ?? [] },
+            });
         }
         if (method === 'PATCH') {
             return Promise.resolve({ status: options.patchStatus ?? 200, body: { id: 'patched' } });
@@ -1128,5 +1138,152 @@ describe('draft per device', () => {
         await adapter.listeners.get('ready')?.(undefined);
         (adapter as unknown as Internals).loop?.stop();
         expect(adapter.subscribed).to.include('draft.*');
+    });
+});
+
+describe('title suggestions', () => {
+    const A = '0a1b2c3d';
+    const DAY = 86_400_000;
+    const user = (val: unknown): { val: unknown; ack: boolean } => ({ val, ack: false });
+    const text = `google-calendar.0.draft.${A}.text`;
+    const calendar = (calendarId: string, type: CalendarConfig['type'], writable = true): CalendarConfig => ({
+        name: calendarId,
+        calendarId,
+        type,
+        color: '#ffffff',
+        writable,
+    });
+    const appointments = calendar('app@example.test', 'appointment');
+    const reminders = calendar('rem@example.test', 'reminder');
+    const birthdays = calendar('bday@example.test', 'birthday');
+    const readOnly = calendar('ro@example.test', 'appointment', false);
+    const four: Settings = {
+        key: null,
+        calendars: [appointments, reminders, birthdays, readOnly],
+        pollMs: 60_000,
+        daysPast: 30,
+        daysPreview: 150,
+        writable: { appointment: appointments, reminder: reminders, birthday: birthdays },
+    };
+    const daysAgo = (days: number, hour: number, minute = 0): string => {
+        const d = new Date(Date.now() - days * DAY);
+        return new Date(d.getFullYear(), d.getMonth(), d.getDate(), hour, minute).toISOString();
+    };
+    const timed = (
+        id: string,
+        summary: string,
+        days: number,
+        from: [number, number],
+        to: [number, number],
+    ): unknown => ({
+        id,
+        summary,
+        start: { dateTime: daysAgo(days, ...from) },
+        end: { dateTime: daysAgo(days, ...to) },
+    });
+    const events = {
+        [appointments.calendarId]: [
+            timed('old', 'Zahnarzt', 100, [8, 30], [9, 45]),
+            timed('new', 'Elternabend', 2, [19, 0], [21, 0]),
+        ],
+        [reminders.calendarId]: [timed('rem', 'Müll', 3, [7, 0], [7, 0])],
+        [birthdays.calendarId]: [
+            { id: 'b', summary: 'Oma', start: { date: '2099-01-05' }, end: { date: '2099-01-06' } },
+        ],
+        [readOnly.calendarId]: [timed('ro', 'Geheim', 5, [10, 0], [11, 0])],
+    };
+    const titles = (adapter: FakeAdapter): string[] =>
+        (JSON.parse(String(adapter.states.get('suggestions'))) as { value: string }[]).map(item => item.value);
+    const windowDays = (calls: Call[], calendarId: string): number => {
+        const call = calls.find(c => c.url.includes(`/calendars/${encodeURIComponent(calendarId)}/events?`));
+        return Math.round((Date.now() - Date.parse(new URL(call?.url ?? '').searchParams.get('timeMin') ?? '')) / DAY);
+    };
+
+    it('reads the writable appointment and reminder calendars a year back, the others daysPast', async () => {
+        const { internals, calls } = startCycle({ settings: four });
+        await internals.cycle();
+        expect(windowDays(calls, appointments.calendarId)).to.equal(365);
+        expect(windowDays(calls, reminders.calendarId)).to.equal(365);
+        expect(windowDays(calls, birthdays.calendarId)).to.equal(30);
+        expect(windowDays(calls, readOnly.calendarId)).to.equal(30);
+    });
+
+    it('reads further back when daysPast is longer than a year', async () => {
+        const { internals, calls } = startCycle({ settings: { ...four, daysPast: 400 } });
+        await internals.cycle();
+        expect(windowDays(calls, appointments.calendarId)).to.equal(400);
+        expect(windowDays(calls, birthdays.calendarId)).to.equal(400);
+    });
+
+    it('keeps old rows out of the table but offers their titles, never read-only or birthday titles', async () => {
+        const { adapter, internals } = startCycle({ settings: four, events });
+        await internals.cycle();
+        const table = (JSON.parse(String(adapter.states.get('table'))) as Row[]).map(row => row.event);
+        expect(table).to.have.members(['Elternabend', 'Müll', 'Oma', 'Geheim']);
+        expect(titles(adapter)).to.have.members(['Zahnarzt', 'Elternabend', 'Müll']);
+    });
+
+    it('writes no suggestions when no calendar could be read', async () => {
+        const { adapter, internals } = startCycle({ settings: four, events, listStatus: 500 });
+        await internals.cycle();
+        expect(adapter.states.has('suggestions')).to.equal(false);
+    });
+
+    describe('fill from a known title', () => {
+        async function ready(): Promise<ReturnType<typeof startCycle>> {
+            const setup = startCycle({ settings: four, events });
+            await setup.internals.cycle();
+            await setup.internals.onStateChange('google-calendar.0.draft.request', user(A));
+            return setup;
+        }
+        const field = (adapter: FakeAdapter, name: string): unknown => adapter.states.get(`draft.${A}.${name}`);
+        const view = (adapter: FakeAdapter): Record<string, unknown> =>
+            (JSON.parse(String(adapter.states.get('draft.view'))) as Record<string, Record<string, unknown>>)[A];
+
+        it('takes over type and times of a picked title, the date stays', async () => {
+            const { adapter, internals } = await ready();
+            const startDate = field(adapter, 'startDate');
+            adapter.states.set(`draft.${A}.text`, 'Zahnarzt');
+            await internals.onStateChange(text, user('Zahnarzt'));
+            expect(field(adapter, 'type')).to.equal('appointment');
+            expect(field(adapter, 'startDate')).to.equal(startDate);
+            expect(field(adapter, 'startTime')).to.equal('08:30');
+            expect(field(adapter, 'endDate')).to.equal(startDate);
+            expect(field(adapter, 'endTime')).to.equal('09:45');
+            expect(field(adapter, 'allDay')).to.equal(false);
+            expect(view(adapter).type).to.equal('appointment');
+        });
+
+        it('takes over a title typed in another case and spacing', async () => {
+            const { adapter, internals } = await ready();
+            await internals.onStateChange(text, user('  müll '));
+            expect(field(adapter, 'type')).to.equal('reminder');
+            expect(field(adapter, 'startTime')).to.equal('07:00');
+        });
+
+        it('changes nothing else for an unknown title, a read-only title or an acknowledged write', async () => {
+            const { adapter, internals } = await ready();
+            const before = field(adapter, 'startTime');
+            await internals.onStateChange(text, user('Zahn'));
+            await internals.onStateChange(text, user('Geheim'));
+            await internals.onStateChange(text, { val: 'Zahnarzt', ack: true });
+            expect(field(adapter, 'type')).to.equal('reminder');
+            expect(field(adapter, 'startTime')).to.equal(before);
+        });
+
+        it('fills nothing while editing, for a birthday or while saving', async () => {
+            const { adapter, internals } = await ready();
+            const before = field(adapter, 'startTime');
+            internals.views[A].editing = true;
+            await internals.onStateChange(text, user('Zahnarzt'));
+            internals.views[A].editing = false;
+            adapter.states.set(`draft.${A}.type`, 'birthday');
+            await internals.onStateChange(text, user('Zahnarzt'));
+            adapter.states.set(`draft.${A}.type`, 'reminder');
+            internals.saving.add(A);
+            await internals.onStateChange(text, user('Zahnarzt'));
+            expect(field(adapter, 'type')).to.equal('reminder');
+            expect(field(adapter, 'startTime')).to.equal(before);
+        });
     });
 });
