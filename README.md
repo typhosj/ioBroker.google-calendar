@@ -29,7 +29,7 @@ Reads events from one or more [Google Calendar](https://calendar.google.com) cal
 | Service account key | Content of the downloaded JSON key. Stored encrypted. | empty |
 | Calendars | One row per calendar: name, calendar ID, entry type (appointment, reminder, birthday), colour, writable flag. | none |
 | Poll interval (minutes) | Pause between two reads. After errors the pause grows up to one hour. | 5 |
-| Days in the past | How far back events are read. | 30 |
+| Days in the past | How far back events are read. The writable appointment and reminder calendars are read at least 365 days back for title suggestions; `table` still starts here. | 30 |
 | Days ahead | How far ahead events are read. | 150 |
 
 ## States
@@ -39,6 +39,7 @@ Reads events from one or more [Google Calendar](https://calendar.google.com) cal
 | `info.connection` | true while at least one calendar could be read in the last cycle. |
 | `table` | JSON array with all entries of all calendars, sorted by start. |
 | `upcoming` | JSON array with the next entries, ready for a list widget. |
+| `suggestions` | JSON array with earlier titles of the writable appointment and reminder calendars, ready for the vis2-materialdesign Autocomplete (`value`, `text`, `subText`, `icon`), most frequent first, at most 200. |
 | `draft.request` | Write the vis-2 browser instance ID here to open that browser's form; the adapter empties it again. |
 | `draft.edit` | Written by the vis calendar widget (option **object ID on event click**): JSON `{ "instance": "<id>", "event": <tapped row> }`. Opens that browser's form filled with the entry; the adapter empties it again. |
 | `draft.view` | JSON object with `type`, `allDay`, `result`, `editing` and `confirmDelete` per browser, for vis bindings. |
@@ -63,6 +64,8 @@ A button writes `{instance}` to `draft.request`. On the first request the adapte
 
 To edit an entry, set the Calendar widget's **object ID on event click** (vis2-materialdesign) to `google-calendar.0.draft.edit`. A tap on an entry of a writable calendar opens the form of that browser filled with the entry; entries of read-only calendars open nothing. A birthday shows the real birth date of its series. **Save** changes title and times in Google; description, location and guests stay. A birthday changes as a series, every other entry alone, also one instance of a series created in Google. Changing the type moves the entry: it is created in the calendar of the new type and the old one is deleted; if that delete fails, `result` says so and the form goes on editing the new entry. `draft.<id>.delete` deletes the entry on the second press; any other change in between asks again. When the calendar of the edited entry is no longer the writable calendar of its type (the configuration changed), save says the entry is gone and delete does nothing. Use `editing` and `confirmDelete` from `draft.view` for the dialog title and the delete button.
 
+For title suggestions, use a vis2-materialdesign Autocomplete as the title field: object ID `google-calendar.0.draft.{instance}.text`, input mode `write`, list data method `jsonStringObject` with `{google-calendar.0.suggestions}`, and open the menu from 2 typed characters. When a new entry that is not a birthday gets a text that equals a suggestion (picked from the list, or typed exactly, ignoring case), the adapter takes over the type, all-day, start time and end of the latest entry with that title; the start date stays. While editing, or for a birthday, only the text changes.
+
 vis bindings cannot contain `{instance}` inside an object ID. For those, read `draft.view` with `instance` as a variable, for example `{v:google-calendar.0.draft.view;i:instance;((v||[])[i]||[]).type}`.
 
 The states of a browser stay until they are deleted by hand, for example after its browser data was cleared.
@@ -78,6 +81,7 @@ The states of a browser stay until they are deleted by hand, for example after i
 * (typhosj) the end of a new entry follows its start when the start passes it
 * (typhosj) every vis browser has its own form for new entries
 * (typhosj) edit and delete entries from the vis calendar: a tap opens the form filled with the entry, delete asks once
+* (typhosj) title suggestions for the vis form: a known title fills type, time and duration
 
 ## License
 MIT License
