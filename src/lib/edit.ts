@@ -211,8 +211,11 @@ const patchTime = (time: EventTime): PatchTime =>
     time.date !== undefined ? { date: time.date, dateTime: null } : { dateTime: time.dateTime ?? '', date: null };
 
 /**
- * Patch from a validated draft: title and times only, so recurrence, reminders, description,
- * location and guests stay as they are in Google.
+ * Patch from a validated draft: title and times, so reminders, description, location and guests
+ * stay as they are in Google. A birthday also sends its plain yearly rule: imported series carry
+ * `BYMONTH`/`BYMONTHDAY`, which would keep every occurrence on the old day when only the start moves.
+ * Known limit: the rule replaces all recurrence lines, so an `UNTIL` or `EXDATE` of a birthday
+ * series is dropped; a series split in Google ("this and following") may then show twice.
  *
  * @param body Event built by `buildEvent`.
  */
@@ -220,6 +223,7 @@ export const patchBody = (body: EventBody): EventPatch => ({
     summary: body.summary,
     start: patchTime(body.start),
     end: patchTime(body.end),
+    ...(body.recurrence?.length ? { recurrence: body.recurrence } : {}),
 });
 
 /**

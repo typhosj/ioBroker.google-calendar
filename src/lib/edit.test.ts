@@ -337,7 +337,7 @@ describe('patchBody', () => {
         });
     });
 
-    it('never sends recurrence or reminders, so a series and its notifications stay', () => {
+    it('never sends reminders, so the notifications stay', () => {
         const patch = patchBody({
             summary: 'Oma',
             start: { date: '1950-11-15' },
@@ -345,7 +345,54 @@ describe('patchBody', () => {
             recurrence: ['RRULE:FREQ=YEARLY'],
             reminders: { useDefault: true },
         });
-        expect(patch).to.not.have.any.keys('recurrence', 'reminders');
+        expect(patch).to.not.have.any.keys('reminders');
+    });
+
+    it('sends a birthday its plain yearly rule, so an imported BYMONTH/BYMONTHDAY rule cannot keep the old day', () => {
+        // Imported series carry e.g. RRULE:FREQ=YEARLY;BYMONTH=12;BYMONTHDAY=11; with that rule a
+        // new start alone leaves every yearly occurrence on 11 December.
+        const result = buildEvent({
+            type: 'birthday',
+            text: 'Daniel',
+            startDate: '2024-11-22',
+            startTime: '',
+            endDate: '',
+            endTime: '',
+            allDay: false,
+        });
+        expect(result.ok).to.equal(true);
+        if (result.ok) {
+            const patch = patchBody(result.body);
+            expect(patch.recurrence).to.deep.equal(['RRULE:FREQ=YEARLY']);
+            expect(patch.start).to.deep.equal({ date: '2024-11-22', dateTime: null });
+        }
+    });
+
+    it('sends no recurrence for an entry that is not a series, so a Google series instance keeps its rule', () => {
+        const result = buildEvent({
+            type: 'appointment',
+            text: 'Zahnarzt',
+            startDate: '2026-11-19',
+            startTime: '18:00',
+            endDate: '2026-11-19',
+            endTime: '19:00',
+            allDay: false,
+        });
+        expect(result.ok).to.equal(true);
+        if (result.ok) {
+            expect(patchBody(result.body)).to.not.have.any.keys('recurrence');
+        }
+    });
+
+    it('drops an empty recurrence list instead of clearing the rule in Google', () => {
+        const patch = patchBody({
+            summary: 'A',
+            start: { date: '2026-11-14' },
+            end: { date: '2026-11-15' },
+            recurrence: [],
+            reminders: { useDefault: true },
+        });
+        expect(patch).to.not.have.any.keys('recurrence');
     });
 });
 

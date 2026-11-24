@@ -40,7 +40,7 @@ export interface EventBody {
 /** Start or end in a patch: the other kind is cleared, so a timed entry can become all-day and back. */
 export type PatchTime = { date: string; dateTime: null } | { dateTime: string; date: null };
 
-/** Body of `events.patch`: only title and times change, everything else on the event stays. */
+/** Body of `events.patch`: title and times, plus the yearly rule of a birthday; everything else stays. */
 export interface EventPatch {
     /** New title. */
     summary: string;
@@ -48,6 +48,8 @@ export interface EventPatch {
     start: PatchTime;
     /** New end; exclusive for all-day entries. */
     end: PatchTime;
+    /** Replaces all recurrence lines of the series; only a birthday sends it. */
+    recurrence?: string[];
 }
 
 /** Base URL of the Google Calendar v3 REST API. */
