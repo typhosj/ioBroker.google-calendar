@@ -144,6 +144,22 @@ export const targetOf = (row: Row): Target => ({
 export const writeId = (target: Target): string => (target.type === 'birthday' && target.seriesId) || target.eventId;
 
 /**
+ * Date a birthday form shows: month and day of the tapped occurrence, in the first year on or after the
+ * series start. A series moved in Google can start off its rule (start 2025-11-03 with `BYMONTHDAY=22`);
+ * the master day would then move the series on the next save. A 29 February that the year does not have
+ * keeps the master date.
+ *
+ * @param masterDate Start date of the series master, `YYYY-MM-DD`.
+ * @param occurrence Start of the tapped occurrence.
+ */
+function birthDay(masterDate: string, occurrence: Date): string {
+    const day = isoDate(occurrence).slice(5);
+    const year = Number(masterDate.slice(0, 4)) + (day < masterDate.slice(5) ? 1 : 0);
+    const candidate = new Date(year, occurrence.getMonth(), occurrence.getDate());
+    return candidate.getMonth() === occurrence.getMonth() ? isoDate(candidate) : masterDate;
+}
+
+/**
  * Draft values for an entry. A birthday and an all-day entry get suggested times in case a time is
  * entered; a birthday always shows a date only, the birth date when given.
  *
@@ -158,7 +174,7 @@ export function draftFromRow(row: Row, now: Date, birthDate = ''): DraftValues {
     const suggested = draftDefaults(now);
     // A birthday is a day, also when Google holds it with a time.
     if (row._type === 'birthday') {
-        const day = birthDate || isoDate(start);
+        const day = birthDate ? birthDay(birthDate, start) : isoDate(start);
         return {
             ...base,
             startDate: day,

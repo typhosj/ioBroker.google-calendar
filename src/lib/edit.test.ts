@@ -307,6 +307,44 @@ describe('draftFromRow', () => {
         });
         expect(draftFromRow(lateNight, NOW)).to.include({ startDate: '2026-11-15', endDate: '2026-11-15' });
     });
+
+    it('takes month and day of a birthday from the tapped occurrence when the master start is off the rule', () => {
+        // Moved in Google: master start 2025-11-03, RRULE:FREQ=YEARLY;BYMONTHDAY=22, occurrences on 22 Nov.
+        // Showing the master day would move the series to 3 Nov on the next save.
+        const moved = row({
+            _type: 'birthday',
+            event: 'Daniel',
+            _allDay: true,
+            _date: local(2026, 11, 22),
+            _end: local(2026, 11, 23),
+            _recurringEventId: 's1',
+        });
+        expect(draftFromRow(moved, NOW, '2025-11-03')).to.include({ startDate: '2025-11-22', endDate: '2025-11-22' });
+    });
+
+    it('keeps the master date of a 29 February birthday when the master year has no such day', () => {
+        const leap = row({
+            _type: 'birthday',
+            _allDay: true,
+            _date: local(2028, 2, 29),
+            _end: local(2028, 3, 1),
+            _recurringEventId: 's1',
+        });
+        expect(draftFromRow(leap, NOW, '2025-02-28').startDate).to.equal('2025-02-28');
+        expect(draftFromRow(leap, NOW, '2024-02-29').startDate).to.equal('2024-02-29');
+    });
+
+    it('takes the first occurrence on or after the master start, also across the year end', () => {
+        const january = row({
+            _type: 'birthday',
+            _allDay: true,
+            _date: local(2027, 1, 2),
+            _end: local(2027, 1, 3),
+            _recurringEventId: 's1',
+        });
+        expect(draftFromRow(january, NOW, '1950-12-31').startDate).to.equal('1951-01-02');
+        expect(draftFromRow(january, NOW, '1950-01-02').startDate).to.equal('1950-01-02');
+    });
 });
 
 describe('patchBody', () => {
